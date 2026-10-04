@@ -209,6 +209,7 @@ struct ArtworkPreviewResult {
 struct App {
     Settings settings;
     bool ffmpeg{};
+    bool settings_open{};
     std::array<char, 128> name{}, playlist{};
     int bitrate = 2; // index into bitrates
     bool normalize = true;
@@ -701,6 +702,53 @@ void ffmpeg_page(App& app, HWND window) {
     }
 }
 
+// Reconfigures the game folder and ffmpeg after first-run setup; reachable from any page.
+void settings_modal(App& app, HWND window) {
+    if (app.settings_open) { ImGui::OpenPopup("Settings"); app.settings_open = false; }
+    if (!ImGui::BeginPopupModal("Settings", nullptr, ImGuiWindowFlags_AlwaysAutoResize)) return;
+    ImGui::PushTextWrapPos(ImGui::GetCursorPosX() + S(540));
+
+    ImGui::TextColored(ImVec4(0.22f, 0.65f, 1.0f, 1.0f), "Game folder");
+    ImGui::TextWrapped("%s", app.settings.game.empty() ? "Not set." : narrow(app.settings.game.wstring()).c_str());
+    if (ImGui::Button("Choose game folder...", ImVec2(S(190), S(28)))) {
+        const auto folders = pick(window, true);
+        if (!folders.empty()) {
+            if (game_folder(folders[0])) {
+                app.settings.game = folders[0];
+                save_settings(app.settings);
+                refresh_external_songs(app);
+                set_status(app, "");
+            } else set_status(app, "That folder has no Skate.exe.", true);
+        }
+    }
+
+    ImGui::Separator();
+    ImGui::TextColored(ImVec4(0.22f, 0.65f, 1.0f, 1.0f), "ffmpeg");
+    ImGui::TextWrapped("%s", app.ffmpeg ? "ffmpeg.exe and ffprobe.exe found."
+                                        : "Not found - the packer needs ffmpeg.exe and ffprobe.exe.");
+    if (ImGui::Button("Open the ffmpeg download page", ImVec2(S(230), S(28))))
+        ShellExecuteW(nullptr, L"open", L"https://ffmpeg.org/download.html", nullptr, nullptr, SW_SHOWNORMAL);
+    ImGui::SameLine();
+    if (ImGui::Button("Locate ffmpeg...", ImVec2(S(150), S(28)))) {
+        const auto folders = pick(window, true);
+        if (!folders.empty()) {
+            auto folder = folders[0];
+            if (!fs::exists(folder / L"ffmpeg.exe") && fs::exists(folder / L"bin" / L"ffmpeg.exe")) folder /= L"bin";
+            if (find_ffmpeg(folder)) {
+                app.settings.ffmpeg = folder;
+                save_settings(app.settings);
+                app.ffmpeg = true;
+                set_status(app, "");
+            } else set_status(app, "That folder has no ffmpeg.exe and ffprobe.exe.", true);
+        }
+    }
+
+    ImGui::PopTextWrapPos();
+    ImGui::Separator();
+    if (ImGui::Button("Close", ImVec2(S(120), S(28)))) ImGui::CloseCurrentPopup();
+    ImGui::EndPopup();
+}
+
 void songs_page(App& app, HWND window) {
     const bool busy = app.busy;
     // The mod: name, playlist, quality, and where it goes.
@@ -737,9 +785,11 @@ void songs_page(App& app, HWND window) {
     if (ImGui::IsItemHovered()) ImGui::SetTooltip("Opus audio bitrate (kbps)");
     ImGui::SameLine();
     ImGui::Checkbox("Normalize", &app.normalize);
-    if (ImGui::IsItemHovered()) ImGui::SetTooltip("Equalise track loudness using EBU R128 (-16 LUFS)");
+    if (ImGui::IsItemHovered()) ImGui::SetTooltip("Equalise track loudness using EBU R128 (-15 LUFS)");
     ImGui::SameLine();
     if (ImGui::Button("Artwork...")) ImGui::OpenPopup("Track and playlist artwork");
+    ImGui::SameLine();
+    if (ImGui::Button("Settings...")) app.settings_open = true;
     ImGui::EndDisabled();
 
     if (ImGui::BeginPopupModal("Track and playlist artwork", nullptr, ImGuiWindowFlags_AlwaysAutoResize)) {
@@ -1042,6 +1092,7 @@ void frame(App& app, HWND window) {
     if (!game_folder(app.settings.game) || !app.ffmpeg)
         if (!app.status.empty()) ImGui::TextColored(ImVec4(1, 0.45f, 0.4f, 1), "%s", app.status.c_str());
     ImGui::End();
+    settings_modal(app, window);
 }
 
 LRESULT CALLBACK window_proc(HWND window, UINT message, WPARAM wparam, LPARAM lparam) {

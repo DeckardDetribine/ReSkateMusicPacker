@@ -14,11 +14,17 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   exports.
 - Documentation: this changelog, a `CONTRIBUTING` guide, a rewritten README, and guides under `docs/`,
   plus an MIT `LICENSE`.
+- A **Settings** dialog (from the toolbar) to change the game folder and ffmpeg after the first-run
+  setup, instead of only at startup.
 
 ### Changed
 
 - Loudness normalisation now targets **-15 LUFS** with two-pass `loudnorm`, matching the level of the
   game's own tracks (they measure about -15 LUFS), instead of -16 with a single dynamic pass.
+- ffmpeg/ffprobe now run without a console window, and with their output captured in-process, so the
+  GUI no longer flashes command prompts.
+- The Thunderstore export builds its `.zip` in-process (miniz), so there is no dependency on the
+  system `tar`.
 
 ### Fixed
 
