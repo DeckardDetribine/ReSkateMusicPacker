@@ -27,7 +27,7 @@ target_include_directories(lz4 PUBLIC External/lz4)
 # 2. miniz
 add_library(miniz STATIC External/miniz/miniz.c)
 target_include_directories(miniz SYSTEM PUBLIC External/miniz)
-target_compile_definitions(miniz PUBLIC MINIZ_NO_ARCHIVE_WRITING_APIS MINIZ_NO_DEFLATE_APIS MINIZ_NO_ZLIB_APIS MINIZ_NO_STDIO MINIZ_NO_TIME)
+target_compile_definitions(miniz PUBLIC MINIZ_NO_ZLIB_APIS MINIZ_NO_STDIO MINIZ_NO_TIME)
 
 # 3. zstd
 file(GLOB zstd_sources CONFIGURE_DEPENDS

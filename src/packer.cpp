@@ -19,6 +19,7 @@
 #include "Engine/Core/Json/json.h"
 #include "Engine/Resource/cas_codec.h"
 #include "Engine/Resource/ebx_document.h"
+#include "miniz.h"
 #include "Engine/Resource/ebx_writer.h"
 #include "Engine/Vfs/game_bundles.h"
 #include <Windows.h>
@@ -147,9 +148,76 @@ std::string narrow(const std::wstring& text) {
     WideCharToMultiByte(CP_UTF8, 0, text.data(), static_cast<int>(text.size()), utf8.data(), static_cast<int>(utf8.size()), nullptr, nullptr);
     return utf8;
 }
+// Runs a command line (no shell) with no console window, so the GUI never flashes a terminal.
+// Captures stdout+stderr when asked; `exit_code` receives the process exit code.
+std::string run_process(const std::wstring& command, bool capture, DWORD& exit_code) {
+    SECURITY_ATTRIBUTES attributes{sizeof(attributes), nullptr, TRUE};
+    HANDLE read_pipe = nullptr, write_pipe = nullptr;
+    if (capture && !CreatePipe(&read_pipe, &write_pipe, &attributes, 0)) { exit_code = 1; return {}; }
+    if (read_pipe) SetHandleInformation(read_pipe, HANDLE_FLAG_INHERIT, 0);
+
+    STARTUPINFOW startup{sizeof(startup)};
+    startup.dwFlags = STARTF_USESHOWWINDOW;
+    startup.wShowWindow = SW_HIDE;
+    if (capture) {
+        startup.dwFlags |= STARTF_USESTDHANDLES;
+        startup.hStdOutput = write_pipe;
+        startup.hStdError = write_pipe;
+        startup.hStdInput = nullptr;
+    }
+    PROCESS_INFORMATION process{};
+    std::wstring line = command;
+    const BOOL started = CreateProcessW(nullptr, line.data(), nullptr, nullptr, capture ? TRUE : FALSE,
+                                        CREATE_NO_WINDOW, nullptr, nullptr, &startup, &process);
+    if (write_pipe) CloseHandle(write_pipe);
+    if (!started) {
+        if (read_pipe) CloseHandle(read_pipe);
+        exit_code = static_cast<DWORD>(-1);
+        return {};
+    }
+    std::string output;
+    if (capture && read_pipe) { // drain while the child runs, so a large output cannot deadlock
+        std::array<char, 4096> buffer{};
+        for (DWORD read{}; ReadFile(read_pipe, buffer.data(), static_cast<DWORD>(buffer.size()), &read, nullptr) && read;)
+            output.append(buffer.data(), read);
+        CloseHandle(read_pipe);
+    }
+    WaitForSingleObject(process.hProcess, INFINITE);
+    GetExitCodeProcess(process.hProcess, &exit_code);
+    CloseHandle(process.hThread);
+    CloseHandle(process.hProcess);
+    return output;
+}
 void run(const std::wstring& command) {
-    // cmd strips the outer quotes of a line that starts with one; wrap it so they survive.
-    if (_wsystem((L"\"" + command + L"\"").c_str()) != 0) throw std::runtime_error("Command failed: " + narrow(command));
+    DWORD exit_code{};
+    run_process(command, false, exit_code);
+    if (exit_code != 0) throw std::runtime_error("Command failed: " + narrow(command));
+}
+std::string run_capture(const std::wstring& command) {
+    DWORD exit_code{};
+    const auto output = run_process(command, true, exit_code);
+    if (exit_code != 0) throw std::runtime_error("Command failed: " + narrow(command));
+    return output;
+}
+
+// Packs a folder into a .zip with miniz, so the Thunderstore export needs no external `tar`.
+void zip_write(const fs::path& archive, const fs::path& folder) {
+    mz_zip_archive zip{};
+    if (!mz_zip_writer_init_heap(&zip, 0, 0)) throw std::runtime_error("Could not start the package archive");
+    struct Guard { mz_zip_archive* zip; ~Guard() { mz_zip_writer_end(zip); } } guard{&zip};
+    for (const auto& entry : fs::recursive_directory_iterator(folder)) {
+        if (!entry.is_regular_file()) continue;
+        const auto name = fs::relative(entry.path(), folder).generic_string();
+        const auto bytes = read_file(entry.path());
+        if (!mz_zip_writer_add_mem_ex(&zip, name.c_str(), bytes.data(), bytes.size(), nullptr, 0,
+                                      static_cast<mz_uint>(MZ_DEFAULT_COMPRESSION), 0, 0))
+            throw std::runtime_error("Could not add " + name + " to the package");
+    }
+    void* buffer = nullptr;
+    std::size_t size = 0;
+    if (!mz_zip_writer_finalize_heap_archive(&zip, &buffer, &size) || !buffer)
+        throw std::runtime_error("Could not build the package archive");
+    write_file(archive, std::span<const std::byte>(reinterpret_cast<const std::byte*>(buffer), size));
 }
 
 // ---- metadata ----------------------------------------------------------------------------------
@@ -283,16 +351,11 @@ Opus read_ogg_opus(std::span<const std::byte> ogg) {
 constexpr char loudness_filter[] = "I=-15.0:TP=-1.5:LRA=11";
 constexpr char loudness_cache_tag[] = "_norm15";
 
-std::wstring loudness_af(const fs::path& file, const fs::path& scratch) {
+std::wstring loudness_af(const fs::path& file) {
     const auto base = std::string("loudnorm=") + loudness_filter;
-    const auto jsonFile = scratch / L"loudnorm.json";
-    std::error_code ec;
-    fs::remove(jsonFile, ec);
     try {
-        run(L"ffmpeg -hide_banner -nostats -i \"" + file.wstring() + L"\" -vn -map_metadata -1 -ac 2 -ar 48000 -af " +
-            widen(base) + L":print_format=json -f null - 2> \"" + jsonFile.wstring() + L"\"");
-        const auto bytes = read_file(jsonFile);
-        const std::string text(reinterpret_cast<const char*>(bytes.data()), bytes.size());
+        const auto text = run_capture(L"ffmpeg -hide_banner -nostats -i \"" + file.wstring() +
+            L"\" -vn -map_metadata -1 -ac 2 -ar 48000 -af " + widen(base) + L":print_format=json -f null -");
         const auto start = text.rfind('{'), end = text.rfind('}');
         if (start == std::string::npos || end == std::string::npos || end < start) return widen(base);
         const auto root = Json::parse(text.substr(start, end - start + 1));
@@ -330,7 +393,7 @@ EncodedOpus encode(const Song& song, int bitrate, bool normalize, const fs::path
     }
 
     const auto ogg = scratch / (widen(to_hex(fileSha)) + L"_" + std::to_wstring(bitrate) + L"k" + (normalize ? widen(loudness_cache_tag) : L"") + L".tmp.ogg");
-    const std::wstring af = normalize ? (L"-af " + loudness_af(song.file, scratch) + L" ") : L"";
+    const std::wstring af = normalize ? (L"-af " + loudness_af(song.file) + L" ") : L"";
     run(L"ffmpeg -y -v error -i \"" + song.file.wstring() + L"\" -vn -map_metadata -1 -ac 2 -ar 48000 " +
         af + L"-c:a libopus -b:a " + std::to_wstring(bitrate) + L"k -vbr on -frame_duration 20 "
         L"-application audio -f ogg \"" + ogg.wstring() + L"\"");
@@ -1016,11 +1079,9 @@ fs::path embedded_artwork(const fs::path& track) {
             const auto bytes = read_file(cached);
             if (bytes.size() > 33 && std::memcmp(bytes.data(), "\x89PNG\r\n\x1a\n", 8) == 0) return cached;
         }
-        const auto probe = scratch_folder() / L"cover-streams.json";
-        run(L"ffprobe -v error -select_streams v -show_entries stream=index:stream_disposition=attached_pic -of json \"" +
-            track.wstring() + L"\" > \"" + probe.wstring() + L"\"");
-        const auto bytes = read_file(probe);
-        const auto index = attached_picture(Json::parse(std::string(reinterpret_cast<const char*>(bytes.data()), bytes.size())));
+        const auto index = attached_picture(Json::parse(run_capture(
+            L"ffprobe -v error -select_streams v -show_entries stream=index:stream_disposition=attached_pic -of json \"" +
+            track.wstring() + L"\"")));
         if (index < 0) return {};
         temporary = cache_folder() / widen(key + ".tmp.png");
         run(L"ffmpeg -y -v error -i \"" + track.wstring() + L"\" -map 0:" + std::to_wstring(index) +
@@ -1038,16 +1099,13 @@ fs::path embedded_artwork(const fs::path& track) {
 }
 
 std::vector<SongInfo> scan(std::span<const fs::path> files) {
-    const auto scratch = scratch_folder();
     std::vector<SongInfo> songs;
     for (const auto& file : files) {
         SongInfo song{file};
-        const auto json = scratch / L"tags.json";
         try {
-            run(L"ffprobe -v error -show_entries format=duration:format_tags=artist,title:stream=index:stream_disposition=attached_pic -of json \"" + file.wstring() +
-                L"\" > \"" + json.wstring() + L"\"");
-            const auto bytes = read_file(json);
-            const auto root = Json::parse(std::string(reinterpret_cast<const char*>(bytes.data()), bytes.size()));
+            const auto root = Json::parse(run_capture(
+                L"ffprobe -v error -show_entries format=duration:format_tags=artist,title:stream=index:stream_disposition=attached_pic -of json \"" +
+                file.wstring() + L"\""));
             song.has_embedded_artwork = attached_picture(root) >= 0;
             const auto& format = root.at("format");
             if (format.contains("duration") && format.at("duration").is_string()) song.seconds = std::atof(format.at("duration").string().c_str());
@@ -1061,8 +1119,6 @@ std::vector<SongInfo> scan(std::span<const fs::path> files) {
         } catch (const std::exception&) {
             song.problems.push_back("ffprobe could not read it");
         }
-        std::error_code ignored;
-        fs::remove(json, ignored);   // a stale file must not pass for the next song's tags
         if (song.artist.empty()) song.problems.push_back("no artist tag");
         if (song.title.empty()) song.problems.push_back("no title tag");
         if (song.artist.empty() || song.title.empty()) {
@@ -1325,7 +1381,7 @@ fs::path export_thunderstore(const fs::path& modFolder, const ThunderstoreOption
     }
     if (fs::exists(outZip, ec)) fs::remove(outZip, ec);
 
-    run(L"tar -a -cf \"" + outZip.wstring() + L"\" -C \"" + staging.wstring() + L"\" *");
+    zip_write(outZip, staging);
     fs::remove_all(staging, ec);
 
     if (!fs::exists(outZip, ec))
