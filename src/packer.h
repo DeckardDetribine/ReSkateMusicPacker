@@ -1,0 +1,85 @@
+// ReSkateMusicPacker as a library: songs in, an add-only music mod out. packer.cpp says how.
+// Needs ffmpeg and ffprobe on PATH. Not thread-safe: one scan or pack at a time (they share a
+// scratch folder in %TEMP%).
+#pragma once
+#include <atomic>
+#include <cstddef>
+#include <filesystem>
+#include <functional>
+#include <span>
+#include <stdexcept>
+#include <string>
+#include <vector>
+
+namespace music {
+
+struct SongInfo {
+    std::filesystem::path file;
+    std::string artist, title;             // from the tags, else the "Artist - Title" file name
+    std::string playlist;                  // custom playlist; if empty, uses PackOptions.playlist
+    double seconds = 0;
+    std::vector<std::string> problems;     // why the song may not pack; empty means fine
+};
+
+struct PackOptions {
+    std::filesystem::path game, output;
+    std::string name = "ReSkateMusic";     // the mod's name
+    std::string playlist;                  // the songs' playlist in the music menu
+    int bitrate = 192;                     // kbps, 64-320
+    bool normalize = true;                 // EBU R128 loudness normalization (-16 LUFS) via ffmpeg loudnorm
+};
+
+// One step of pack(). `stage` is "encoding" (detail empty), "encoded" (detail: length, packets
+// and size), "building" or "writing"; the last two are about the whole mod and have song == count.
+struct Progress {
+    std::size_t song, count;
+    const char* stage;
+    std::string detail;
+};
+using ProgressFn = std::function<void(const Progress&)>;
+
+struct PackResult {
+    std::size_t songs, audioKb;
+    std::filesystem::path output;
+};
+
+// Thrown by pack() when `cancel` was set; nothing is left at the output folder.
+struct Cancelled : std::runtime_error {
+    Cancelled() : std::runtime_error("Cancelled") {}
+};
+
+// Whether text is fit for an artist, title or playlist name: 1-255 characters, no control characters.
+bool usable_name(const std::string& text);
+
+// Tags and length of each file, without encoding. Never throws for a bad file: that is a problem entry.
+std::vector<SongInfo> scan(std::span<const std::filesystem::path> files);
+
+// Builds the mod into options.output (any files already there are overwritten). Throws
+// std::runtime_error with a message fit to show, or Cancelled. `progress` and `cancel` may be null;
+// cancel is checked between songs. Songs keep their given order; artist/title override the tags.
+PackResult pack(const PackOptions& options, const std::vector<SongInfo>& songs, const ProgressFn& progress = {},
+                const std::atomic<bool>* cancel = nullptr);
+
+// What a mod was made from. pack() saves it in the mod as reskate-music-project.json (source files
+// as absolute paths), so the mod can be reopened, changed and packed again into the same folder.
+struct Project {
+    std::string name, playlist;
+    int bitrate = 192;
+    bool normalize = true;
+    std::vector<SongInfo> songs;   // file, artist and title; scan() the files for length and problems
+};
+// Throws std::runtime_error, with a message fit to show, when the folder has no project or a bad one.
+Project load_project(const std::filesystem::path& mod);
+
+struct ThunderstoreOptions {
+    std::string author = "Author";
+    std::string version = "1.0.0";
+    std::string description;
+    std::filesystem::path icon;     // optional custom icon.png; if empty, uses mod's icon.png or generates a default
+    std::filesystem::path output;   // output .zip path; if empty, saves as <Author>-<Name>-<Version>.zip beside the mod
+};
+
+// Packages a built mod folder as a Thunderstore-compatible .zip.
+std::filesystem::path export_thunderstore(const std::filesystem::path& modFolder, const ThunderstoreOptions& options = {});
+
+} // namespace music

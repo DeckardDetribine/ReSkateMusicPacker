@@ -1,0 +1,6 @@
+build/
+.vs/
+*.user
+*.exe.recipe
+*.ilk
+*.pdb
