@@ -199,6 +199,16 @@ fs::path cache_folder() {
     return folder;
 }
 
+int attached_picture(const Json& root) {
+    if (root.contains("streams") && root.at("streams").is_array())
+        for (const auto& stream : root.at("streams"))
+            if (stream.contains("disposition") && stream.at("disposition").value("attached_pic", 0) == 1)
+                return stream.at("index").get<int>();
+    return -1;
+}
+constexpr wchar_t artwork_filter[] =
+    L"scale=512:512:force_original_aspect_ratio=decrease,pad=512:512:(ow-iw)/2:(oh-ih)/2:color=0x242035,setsar=1";
+
 // ---- audio -------------------------------------------------------------------------------------
 
 struct Opus {
@@ -314,8 +324,8 @@ void put_block(std::vector<std::byte>& out, std::uint8_t id, std::span<const std
     out.insert(out.end(), payload.begin(), payload.end());
 }
 
-// The 10-byte codec header: the template's, with this song's sample count (bits 6 and up
-// of its second word; the low 6 bits are flags the shipped songs all share).
+// The 10-byte codec header: its count is the playable sample total, matching the sum of the
+// D blocks' own sample counts (the shipped songs store exactly that).
 std::array<std::byte, 10> codec_header(std::span<const std::byte, 10> templateHeader, std::uint64_t samples) {
     if (samples >= (1ull << 26)) throw std::runtime_error("Song too long");
     std::array<std::byte, 10> header;
@@ -325,6 +335,22 @@ std::array<std::byte, 10> codec_header(std::span<const std::byte, 10> templateHe
     word = static_cast<std::uint32_t>(samples << 6) | (word & 0x3F);
     for (int i = 0; i < 4; ++i) header[4 + i] = static_cast<std::byte>(word >> (24 - 8 * i));
     return header;
+}
+
+// The playable sample total: exactly what the D blocks carry. The first block leaves out the
+// encoder's pre-skip, the last leaves out any padding past the stream's granule. This is what
+// `stream_chunk` writes and what the shipped songs store in the codec header, so it must be
+// computed from the packets, not from the Ogg granule (ffmpeg writes the input duration there,
+// which can exceed the decoded packet sum).
+std::uint64_t playable_samples(const Opus& opus) {
+    std::uint64_t remaining = opus.samples, total = 0;
+    for (std::size_t index = 0; index < opus.packets.size() && remaining; ++index) {
+        std::uint64_t yields = packet_samples - (index == 0 ? std::min<std::uint32_t>(opus.preSkip, packet_samples) : 0);
+        yields = std::min(yields, remaining);
+        remaining -= yields;
+        total += yields;
+    }
+    return total;
 }
 
 // H header, one D block per packet (u32 BE samples it yields + the packet), E end. Like the
@@ -535,7 +561,7 @@ constexpr std::uint32_t wave_resource_type = 0xb2c465f6;
 struct WaveFacts {
     fb::Guid instance, prefetchId, streamId;
     std::uint32_t prefetchSize{}, streamSize{};
-    std::uint64_t samples{};
+    std::uint64_t samples{}; // SoundBank duration, matching the H header's playable sample total.
     std::string name;
 };
 
@@ -694,7 +720,8 @@ music::PackResult build(const music::PackOptions& options, const fs::path& out, 
 
         const auto encoded = encode(song, options.bitrate, options.normalize, scratch);
         const auto& opus = encoded.opus;
-        const auto header = codec_header(templateHeader, opus.samples);
+        const auto samples = playable_samples(opus);
+        const auto header = codec_header(templateHeader, samples);
         const auto stream = stream_chunk(opus, header);
         const auto prefetch = prefetch_chunk(templatePrefetch, opus, header, stream);
         char detail[96];
@@ -758,7 +785,7 @@ music::PackResult build(const music::PackOptions& options, const fs::path& out, 
         facts.streamId = chunks.back().guid;
         facts.prefetchSize = static_cast<std::uint32_t>(prefetch.size());
         facts.streamSize = static_cast<std::uint32_t>(stream.size());
-        facts.samples = opus.samples;
+        facts.samples = samples;
         facts.name = waveName;
         assets.push_back({lowered(waveName), ebx::write_document(wave)});
         assets.push_back({lowered(songName), ebx::write_document(graph)});
@@ -848,17 +875,54 @@ music::PackResult build(const music::PackOptions& options, const fs::path& out, 
             if (!playlistSongs.contains(pName)) playlistOrder.push_back(pName);
             playlistSongs[pName].push_back(order[i]);
         }
-        std::string json = "{\n  \"schema\": 1,\n  \"playlists\": [";
+        auto metadata = Json::object();
+        metadata["schema"] = 1;
+        auto playlists = Json::array();
+        auto covers = Json::object();
+        std::map<fs::path, std::string> images;
+        const auto image = [&](const fs::path& source) -> std::string {
+            if (cancel && *cancel) throw music::Cancelled();
+            if (source.empty()) return {};
+            const auto absolute = fs::absolute(source);
+            if (const auto found = images.find(absolute); found != images.end()) return found->second;
+            if (!fs::is_regular_file(absolute)) throw std::runtime_error("Artwork file is missing: " + narrow(absolute.wstring()));
+            const auto relative = "artwork/cover-" + std::to_string(images.size()) + ".png";
+            const auto target = out / widen(relative);
+            fs::create_directories(target.parent_path());
+            write_file(target, music::image_artwork_png(absolute));
+            if (cancel && *cancel) throw music::Cancelled();
+            images.emplace(absolute, relative);
+            return relative;
+        };
+        // Track artwork is resolved first so a playlist can borrow its first available cover.
+        for (std::size_t i = 0; i < files.size(); ++i) {
+            if (cancel && *cancel) throw music::Cancelled();
+            const auto source = files[i].artwork.empty() ? music::embedded_artwork(files[i].file) : files[i].artwork;
+            if (!source.empty()) covers[order[i]] = image(source);
+        }
         for (std::size_t pi = 0; pi < playlistOrder.size(); ++pi) {
             const auto& pName = playlistOrder[pi];
-            json += (pi == 0 ? "\n    {\n      \"name\": " : ",\n    {\n      \"name\": ") + json_string(pName) + ",\n      \"songs\": [";
+            auto entry = Json::object();
+            entry["name"] = pName;
+            entry["songs"] = Json::array();
             const auto& sList = playlistSongs[pName];
-            std::string list;
-            for (const auto& id : sList) list += (list.empty() ? "\n        " : ",\n        ") + json_string(id);
-            json += list + "\n      ]\n    }";
+            for (const auto& id : sList) entry["songs"].push_back(id);
+            if (const auto art = options.playlist_artwork.find(pName); art != options.playlist_artwork.end() && !art->second.empty())
+                entry["artwork"] = image(art->second);
+            else if (options.generated_playlist_artwork.contains(pName)) {
+                if (cancel && *cancel) throw music::Cancelled();
+                const auto relative = "artwork/playlist-" + std::to_string(pi) + ".png";
+                write_file(out / widen(relative), music::playlist_artwork_png(pName));
+                entry["artwork"] = relative;
+            } else {
+                for (const auto& id : sList)
+                    if (covers.contains(id)) { entry["artwork"] = covers.at(id).string(); break; }
+            }
+            playlists.push_back(std::move(entry));
         }
-        json += "\n  ]\n}\n";
-        write_file(out / L"reskate-music.json", text(json));
+        metadata["playlists"] = std::move(playlists);
+        if (!covers.empty()) metadata["song_artwork"] = std::move(covers);
+        write_file(out / L"reskate-music.json", text(metadata.dump(2) + "\n"));
     }
     write_file(out / L"reskate-build.json", text("{\n  \"schema\": 1,\n  \"tool\": \"ReSkateMusicPacker\",\n  \"version\": \"0.1.0\"\n}\n"));
     // What the mod was made from, so it can be reopened and changed (load_project).
@@ -869,6 +933,12 @@ music::PackResult build(const music::PackOptions& options, const fs::path& out, 
         project["playlist"] = options.playlist;
         project["bitrate"] = options.bitrate;
         project["normalize"] = options.normalize;
+        auto playlistArt = Json::object();
+        for (const auto& [name, path] : options.playlist_artwork)
+            if (!path.empty()) playlistArt[name] = narrow(fs::absolute(path).wstring());
+        project["playlist_artwork"] = std::move(playlistArt);
+        project["generated_playlist_artwork"] = Json::array();
+        for (const auto& name : options.generated_playlist_artwork) project["generated_playlist_artwork"].push_back(name);
         auto list = Json::array();
         for (const auto& song : files) {
             auto entry = Json::object();
@@ -876,6 +946,7 @@ music::PackResult build(const music::PackOptions& options, const fs::path& out, 
             entry["artist"] = song.artist;
             entry["title"] = song.title;
             if (!song.playlist.empty()) entry["playlist"] = song.playlist;
+            if (!song.artwork.empty()) entry["artwork"] = narrow(fs::absolute(song.artwork).wstring());
             list.push_back(std::move(entry));
         }
         project["songs"] = std::move(list);
@@ -889,6 +960,50 @@ namespace music {
 
 bool usable_name(const std::string& text) { return usable(text); }
 
+std::vector<std::byte> image_artwork_png(const fs::path& image) {
+    const auto temporary = scratch_folder() / L"image-preview.png";
+    std::error_code ignored;
+    fs::remove(temporary, ignored);
+    try {
+        run(L"ffmpeg -y -v error -i \"" + image.wstring() +
+            L"\" -an -vf \"" + artwork_filter + L"\" -frames:v 1 -update 1 \"" +
+            temporary.wstring() + L"\"");
+        auto bytes = read_file(temporary);
+        fs::remove(temporary, ignored);
+        return bytes;
+    } catch (...) { fs::remove(temporary, ignored); throw; }
+}
+
+fs::path embedded_artwork(const fs::path& track) {
+    fs::path temporary;
+    try {
+        const auto key = to_hex(sha1_of_file(track)) + "_cover_v2_fit";
+        const auto cached = cache_folder() / widen(key + ".png");
+        if (fs::is_regular_file(cached) && fs::file_size(cached) > 33) {
+            const auto bytes = read_file(cached);
+            if (bytes.size() > 33 && std::memcmp(bytes.data(), "\x89PNG\r\n\x1a\n", 8) == 0) return cached;
+        }
+        const auto probe = scratch_folder() / L"cover-streams.json";
+        run(L"ffprobe -v error -select_streams v -show_entries stream=index:stream_disposition=attached_pic -of json \"" +
+            track.wstring() + L"\" > \"" + probe.wstring() + L"\"");
+        const auto bytes = read_file(probe);
+        const auto index = attached_picture(Json::parse(std::string(reinterpret_cast<const char*>(bytes.data()), bytes.size())));
+        if (index < 0) return {};
+        temporary = cache_folder() / widen(key + ".tmp.png");
+        run(L"ffmpeg -y -v error -i \"" + track.wstring() + L"\" -map 0:" + std::to_wstring(index) +
+            L" -an -vf \"" + artwork_filter + L"\" -frames:v 1 -update 1 \"" +
+            temporary.wstring() + L"\"");
+        std::error_code ignored;
+        fs::remove(cached, ignored);
+        fs::rename(temporary, cached);
+        return cached;
+    } catch (const std::exception&) {
+        std::error_code ignored;
+        if (!temporary.empty()) fs::remove(temporary, ignored);
+        return {}; // Missing or damaged optional artwork must not prevent audio packing.
+    }
+}
+
 std::vector<SongInfo> scan(std::span<const fs::path> files) {
     const auto scratch = scratch_folder();
     std::vector<SongInfo> songs;
@@ -896,10 +1011,11 @@ std::vector<SongInfo> scan(std::span<const fs::path> files) {
         SongInfo song{file};
         const auto json = scratch / L"tags.json";
         try {
-            run(L"ffprobe -v error -show_entries format=duration:format_tags=artist,title -of json \"" + file.wstring() +
+            run(L"ffprobe -v error -show_entries format=duration:format_tags=artist,title:stream=index:stream_disposition=attached_pic -of json \"" + file.wstring() +
                 L"\" > \"" + json.wstring() + L"\"");
             const auto bytes = read_file(json);
             const auto root = Json::parse(std::string(reinterpret_cast<const char*>(bytes.data()), bytes.size()));
+            song.has_embedded_artwork = attached_picture(root) >= 0;
             const auto& format = root.at("format");
             if (format.contains("duration") && format.at("duration").is_string()) song.seconds = std::atof(format.at("duration").string().c_str());
             if (format.contains("tags")) {
@@ -973,9 +1089,15 @@ Project load_project(const fs::path& mod) {
         project.playlist = root.at("playlist").string();
         project.bitrate = root.at("bitrate").get<int>();
         project.normalize = root.contains("normalize") ? root.at("normalize").get<bool>() : true;
+        if (root.contains("playlist_artwork"))
+            for (const auto& [name, imagePath] : root.at("playlist_artwork").items())
+                project.playlist_artwork[name] = fs::path(widen(imagePath.string()));
+        if (root.contains("generated_playlist_artwork"))
+            for (const auto& name : root.at("generated_playlist_artwork")) project.generated_playlist_artwork.insert(name.string());
         for (const auto& song : root.at("songs")) {
             SongInfo info{fs::path(widen(song.at("file").string())), song.at("artist").string(), song.at("title").string()};
             if (song.contains("playlist")) info.playlist = song.at("playlist").string();
+            if (song.contains("artwork")) info.artwork = fs::path(widen(song.at("artwork").string()));
             project.songs.push_back(std::move(info));
         }
         return project;

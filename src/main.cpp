@@ -21,6 +21,7 @@
 #include <array>
 #include <atomic>
 #include <cctype>
+#include <cstring>
 #include <fstream>
 #include <functional>
 #include <iterator>
@@ -132,15 +133,15 @@ bool game_running() {
 }
 
 // The shell's file dialog: audio files (several) or one folder.
-std::vector<fs::path> pick(HWND owner, bool folder) {
+std::vector<fs::path> pick(HWND owner, bool folder, bool image = false) {
     std::vector<fs::path> result;
     ComPtr<IFileOpenDialog> dialog;
     if (FAILED(CoCreateInstance(CLSID_FileOpenDialog, nullptr, CLSCTX_INPROC_SERVER, IID_PPV_ARGS(&dialog)))) return result;
     FILEOPENDIALOGOPTIONS options{};
     dialog->GetOptions(&options);
-    dialog->SetOptions(options | (folder ? FOS_PICKFOLDERS : FOS_ALLOWMULTISELECT) | FOS_FORCEFILESYSTEM);
+    dialog->SetOptions(options | (folder ? FOS_PICKFOLDERS : image ? 0 : FOS_ALLOWMULTISELECT) | FOS_FORCEFILESYSTEM);
     if (!folder) {
-        const COMDLG_FILTERSPEC filters[]{{L"Audio", L"*.mp3;*.flac;*.ogg;*.opus;*.wav;*.m4a;*.aac;*.wma;*.aiff;*.aif;*.webm;*.mka;*.mp4"}, {L"All files", L"*.*"}};
+        const COMDLG_FILTERSPEC filters[]{{image ? L"Images" : L"Audio", image ? L"*.png;*.jpg;*.jpeg;*.webp;*.bmp" : L"*.mp3;*.flac;*.ogg;*.opus;*.wav;*.m4a;*.aac;*.wma;*.aiff;*.aif;*.webm;*.mka;*.mp4"}, {L"All files", L"*.*"}};
         dialog->SetFileTypes(2, filters);
     }
     if (FAILED(dialog->Show(owner))) return result;
@@ -194,6 +195,15 @@ struct Row {
     double seconds{};
     std::vector<std::string> problems; // from scan()
     bool scanned{};
+    fs::path artwork;
+    bool has_embedded_artwork{};
+};
+
+struct ArtworkPreviewResult {
+    std::uint64_t generation{};
+    std::vector<unsigned char> pixels;
+    UINT width{}, height{};
+    std::string error;
 };
 
 struct App {
@@ -202,6 +212,13 @@ struct App {
     std::array<char, 128> name{}, playlist{};
     int bitrate = 2; // index into bitrates
     bool normalize = true;
+    std::map<std::string, fs::path> playlist_artwork;
+    std::set<std::string> generated_playlist_artwork;
+    Renderer* renderer{};
+    ImTextureID artwork_preview{};
+    std::string artwork_preview_label, artwork_preview_error;
+    std::uint64_t artwork_preview_generation{}; // UI-owned; workers capture a value, never read it
+    bool artwork_preview_loading{};
     std::vector<Row> rows;
     fs::path output; // empty: Mods\<folder_name(name)>
     std::string status;
@@ -216,6 +233,7 @@ struct App {
     std::string progress_text;
     std::vector<std::pair<fs::path, music::SongInfo>> scanned;  // finished scans to apply
     std::optional<std::pair<bool, std::string>> finished;       // a build's result: ok, message
+    std::optional<ArtworkPreviewResult> artwork_preview_ready; // guarded by mutex
 
     std::vector<fs::path> dropped;
     std::mutex dropped_mutex;
@@ -230,6 +248,14 @@ struct App {
 } *g_app;
 
 void set_status(App& app, std::string text, bool error = false) { app.status = std::move(text); app.status_error = error; }
+void clear_artwork_preview(App& app) {
+    ++app.artwork_preview_generation; // Invalidate any result still being prepared.
+    app.artwork_preview_loading = false;
+    if (app.artwork_preview) app.renderer->release_texture(app.artwork_preview);
+    app.artwork_preview = {};
+    app.artwork_preview_label.clear();
+    app.artwork_preview_error.clear();
+}
 
 fs::path output_folder(const App& app) {
     return !app.output.empty() ? app.output : app.settings.game / L"Mods" / folder_name(app.name.data());
@@ -348,6 +374,62 @@ void start(App& app, std::string job, std::function<void()> work) {
     });
 }
 
+void request_artwork_preview(App& app, std::string label, fs::path source, bool generated,
+    std::vector<std::pair<fs::path, fs::path>> tracks = {}) {
+    if (app.busy) return;
+    clear_artwork_preview(app);
+    app.artwork_preview_label = label;
+    app.artwork_preview_loading = true;
+    const auto generation = app.artwork_preview_generation;
+    // Resolve embedded art, run FFmpeg and decode pixels off the UI thread. Inputs are
+    // snapshots; row edits and renderer resources are never accessed by this worker.
+    start(app, "Loading artwork", [&app, label = std::move(label), source = std::move(source), generated,
+        tracks = std::move(tracks), generation]() mutable {
+        ArtworkPreviewResult result;
+        result.generation = generation;
+        const auto com = CoInitializeEx(nullptr, COINIT_MULTITHREADED);
+        struct Com { HRESULT status; ~Com() { if (SUCCEEDED(status)) CoUninitialize(); } } cleanup{com};
+        try {
+            if (FAILED(com)) throw std::runtime_error("Could not initialise artwork decoding.");
+            if (source.empty() && !generated)
+                for (const auto& [file, artwork] : tracks) {
+                    if (app.cancel) throw music::Cancelled();
+                    source = artwork.empty() ? music::embedded_artwork(file) : artwork;
+                    if (!source.empty()) break;
+                }
+            if (app.cancel) throw music::Cancelled();
+            if (!generated && source.empty()) throw std::runtime_error("No artwork available for this cover.");
+            const auto png = generated ? music::playlist_artwork_png(label) : music::image_artwork_png(source);
+            if (app.cancel) throw music::Cancelled();
+            std::vector<unsigned char> bytes(png.size());
+            std::memcpy(bytes.data(), png.data(), png.size());
+            if (!dingosdk::launcher_gui::detail::decode_image(bytes, ImVec2(512, 512), result.pixels, result.width, result.height))
+                throw std::runtime_error("Could not preview the cover image.");
+        } catch (const std::exception& error) { result.error = error.what(); }
+        std::lock_guard lock(app.mutex);
+        app.artwork_preview_ready = std::move(result);
+    });
+}
+
+void apply_artwork_preview(App& app) {
+    std::optional<ArtworkPreviewResult> ready;
+    {
+        std::lock_guard lock(app.mutex);
+        ready = std::move(app.artwork_preview_ready);
+        app.artwork_preview_ready.reset();
+    }
+    if (!ready || ready->generation != app.artwork_preview_generation) return;
+    app.artwork_preview_loading = false;
+    app.artwork_preview_error = std::move(ready->error);
+    if (!app.artwork_preview_error.empty()) return;
+    // Direct3D resources remain owned by the UI thread.
+    try {
+        const auto texture = app.renderer->upload_texture(ready->pixels, ready->width, ready->height);
+        if (!texture) app.artwork_preview_error = "Could not display the cover preview.";
+        else app.artwork_preview = texture;
+    } catch (const std::exception& error) { app.artwork_preview_error = error.what(); }
+}
+
 void add_files(App& app, const std::vector<fs::path>& paths) {
     auto files = expand(paths);
     std::erase_if(files, [&](const fs::path& file) {
@@ -370,12 +452,15 @@ void add_files(App& app, const std::vector<fs::path>& paths) {
 void open_mod(App& app, const fs::path& folder) {
     try {
         const auto project = music::load_project(folder);
+        clear_artwork_preview(app);
         app.rows.clear();
         copy_text(app.name, project.name);
         copy_text(app.playlist, project.playlist);
         app.bitrate = 2;
         for (int i = 0; i < 5; ++i) if (std::stoi(bitrates[i]) == project.bitrate) app.bitrate = i;
         app.normalize = project.normalize;
+        app.playlist_artwork = project.playlist_artwork;
+        app.generated_playlist_artwork = project.generated_playlist_artwork;
         app.output = folder;
         refresh_external_songs(app);
         std::vector<fs::path> files;
@@ -384,6 +469,7 @@ void open_mod(App& app, const fs::path& folder) {
             copy_text(row.artist, song.artist);
             copy_text(row.title, song.title);
             copy_text(row.playlist, song.playlist);
+            row.artwork = song.artwork;
             app.rows.push_back(row);
             files.push_back(song.file);
         }
@@ -410,6 +496,7 @@ void apply_scans(App& app) {
             if (row.file == file && !row.scanned) {
                 row.scanned = true;
                 row.seconds = info.seconds;
+                row.has_embedded_artwork = info.has_embedded_artwork;
                 // Problems about the tags fall away once artist and title are filled in by hand.
                 std::erase_if(info.problems, [](const std::string& p) { return p.find("tag") != std::string::npos; });
                 row.problems = info.problems;
@@ -452,8 +539,14 @@ void build(App& app) {
     options.playlist = app.playlist.data();
     options.bitrate = std::stoi(bitrates[app.bitrate]);
     options.normalize = app.normalize;
+    options.playlist_artwork = app.playlist_artwork;
+    options.generated_playlist_artwork = app.generated_playlist_artwork;
     std::vector<music::SongInfo> songs;
-    for (const auto& row : app.rows) songs.push_back({row.file, row.artist.data(), row.title.data(), row.playlist.data()});
+    for (const auto& row : app.rows) {
+        music::SongInfo song{row.file, row.artist.data(), row.title.data(), row.playlist.data()};
+        song.artwork = row.artwork;
+        songs.push_back(std::move(song));
+    }
     start(app, "Building", [&app, options, songs] {
         std::pair<bool, std::string> result;
         try {
@@ -618,6 +711,9 @@ void songs_page(App& app, HWND window) {
         app.name.fill(0);
         app.playlist.fill(0);
         app.normalize = true;
+        app.playlist_artwork.clear();
+        app.generated_playlist_artwork.clear();
+        clear_artwork_preview(app);
         set_status(app, "");
     }
     ImGui::SameLine();
@@ -642,7 +738,92 @@ void songs_page(App& app, HWND window) {
     ImGui::SameLine();
     ImGui::Checkbox("Normalize", &app.normalize);
     if (ImGui::IsItemHovered()) ImGui::SetTooltip("Equalise track loudness using EBU R128 (-16 LUFS)");
+    ImGui::SameLine();
+    if (ImGui::Button("Artwork...")) ImGui::OpenPopup("Track and playlist artwork");
     ImGui::EndDisabled();
+
+    if (ImGui::BeginPopupModal("Track and playlist artwork", nullptr, ImGuiWindowFlags_AlwaysAutoResize)) {
+        ImGui::PushTextWrapPos(ImGui::GetCursorPosX() + S(700));
+        ImGui::TextWrapped("Track covers use embedded album art unless you choose an image. Playlists use their first track cover, or you can choose an image or generate a text cover.");
+        ImGui::PopTextWrapPos();
+        ImGui::BeginDisabled(busy);
+        const auto preview = [&](const std::string& label, const fs::path& source, bool generated) {
+            request_artwork_preview(app, label, source, generated);
+        };
+        const auto choose = [&](const std::string& label, fs::path& image) {
+            bool selected = false;
+            ImGui::PushID(label.c_str());
+            ImGui::TextWrapped("%s", label.c_str());
+            ImGui::TextDisabled("%s", image.empty() ? "Automatic cover" : narrow(image.filename().wstring()).c_str());
+            if (!image.empty() && ImGui::IsItemHovered()) ImGui::SetTooltip("%s", narrow(image.wstring()).c_str());
+            if (ImGui::Button("Choose image...")) {
+                const auto files = pick(window, false, true);
+                if (!files.empty()) { image = files[0]; selected = true; preview(label, image, false); }
+            }
+            ImGui::SameLine();
+            if (ImGui::Button("Use automatic")) { image.clear(); clear_artwork_preview(app); }
+            ImGui::PopID();
+            return selected;
+        };
+        if (ImGui::BeginChild("covers", ImVec2(S(480), S(360)))) {
+            ImGui::TextUnformatted("Playlists");
+            std::set<std::string> names;
+            if (app.playlist[0]) names.insert(app.playlist.data());
+            for (const auto& row : app.rows) if (row.playlist[0]) names.insert(row.playlist.data());
+            ImGui::PushID("playlists");
+            for (const auto& name : names) {
+                if (choose(name, app.playlist_artwork[name])) app.generated_playlist_artwork.erase(name);
+                ImGui::PushID(name.c_str());
+                bool generated = app.generated_playlist_artwork.contains(name);
+                if (ImGui::Checkbox("Generate text cover", &generated)) {
+                    if (generated) {
+                        app.generated_playlist_artwork.insert(name);
+                        app.playlist_artwork[name].clear();
+                        preview(name, {}, true);
+                    } else { app.generated_playlist_artwork.erase(name); clear_artwork_preview(app); }
+                }
+                if (ImGui::Button("Preview")) {
+                    auto source = app.playlist_artwork[name];
+                    std::vector<std::pair<fs::path, fs::path>> tracks;
+                    if (source.empty() && !generated)
+                        for (const auto& row : app.rows) {
+                            const auto playlist = row.playlist[0] ? row.playlist.data() : app.playlist.data();
+                            if (name != playlist) continue;
+                            tracks.emplace_back(row.file, row.artwork);
+                        }
+                    request_artwork_preview(app, name, source, source.empty() && generated, std::move(tracks));
+                }
+                ImGui::Separator();
+                ImGui::PopID();
+            }
+            ImGui::PopID();
+            ImGui::TextUnformatted("Tracks");
+            for (std::size_t i = 0; i < app.rows.size(); ++i) {
+                ImGui::PushID(static_cast<int>(i));
+                auto& row = app.rows[i];
+                choose(std::string(row.artist.data()) + " - " + row.title.data(), row.artwork);
+                if (row.artwork.empty()) ImGui::TextDisabled("%s", row.has_embedded_artwork ? "Embedded album art detected" : "No embedded album art detected");
+                if (ImGui::Button("Preview"))
+                    request_artwork_preview(app, std::string(row.artist.data()) + " - " + row.title.data(),
+                        row.artwork, false, {{row.file, {}}});
+                ImGui::Separator();
+                ImGui::PopID();
+            }
+        }
+        ImGui::EndChild();
+        ImGui::SameLine();
+        if (ImGui::BeginChild("cover-preview", ImVec2(S(220), S(360)))) {
+            ImGui::TextWrapped("%s", app.artwork_preview_label.empty() ? "Cover preview" : app.artwork_preview_label.c_str());
+            if (app.artwork_preview_loading) ImGui::TextWrapped("Loading artwork...");
+            else if (app.artwork_preview) ImGui::Image(app.artwork_preview, ImVec2(S(200), S(200)));
+            else ImGui::TextWrapped("Choose a cover or click Preview.");
+            if (!app.artwork_preview_error.empty()) ImGui::TextWrapped("%s", app.artwork_preview_error.c_str());
+        }
+        ImGui::EndChild();
+        ImGui::EndDisabled();
+        if (ImGui::Button("Done", ImVec2(S(120), 0))) ImGui::CloseCurrentPopup();
+        ImGui::EndPopup();
+    }
 
     ImGui::Spacing();
     ImGui::TextDisabled("Builds into: %s", narrow(output_folder(app).wstring()).c_str());
@@ -834,6 +1015,7 @@ void songs_page(App& app, HWND window) {
 
 void frame(App& app, HWND window) {
     apply_scans(app);
+    apply_artwork_preview(app);
     {
         std::lock_guard lock(app.mutex);
         if (app.finished) {
@@ -896,6 +1078,7 @@ int run_cli(int argc, wchar_t** argv) {
     music::PackOptions options;
     std::vector<fs::path> positional;
     bool thunderstore = false;
+    std::map<std::string, fs::path> trackArtwork;
     std::string author = "Author", version = "1.0.0";
     for (int i = 1; i < argc; ++i) {
         const std::wstring arg = argv[i];
@@ -911,6 +1094,9 @@ int run_cli(int argc, wchar_t** argv) {
                         "  --thunderstore             Export a Thunderstore-ready zip package\n"
                         "  --author <name>            Thunderstore package author (default: Author)\n"
                         "  --version <x.y.z>          Thunderstore package version (default: 1.0.0)\n"
+                        "  --playlist-artwork <name> <image>  Cover for a playlist\n"
+                        "  --track-artwork <id> <image>       Cover for Artist - Title\n"
+                        "  --generate-playlist-artwork <name> Text cover for a playlist\n"
                         "  --gui                      Launch graphical user interface\n"
                         "  --help, -h                 Show this help text\n");
             return 0;
@@ -922,6 +1108,16 @@ int run_cli(int argc, wchar_t** argv) {
         else if (arg == L"--thunderstore") thunderstore = true;
         else if (arg == L"--author" && i + 1 < argc) author = narrow(argv[++i]);
         else if (arg == L"--version" && i + 1 < argc) version = narrow(argv[++i]);
+        else if (arg == L"--playlist-artwork" && i + 2 < argc) {
+            const auto name = narrow(argv[++i]);
+            options.playlist_artwork[name] = argv[++i];
+        }
+        else if (arg == L"--track-artwork" && i + 2 < argc) {
+            const auto id = narrow(argv[++i]);
+            trackArtwork[id] = argv[++i];
+        }
+        else if (arg == L"--generate-playlist-artwork" && i + 1 < argc)
+            options.generated_playlist_artwork.insert(narrow(argv[++i]));
         else if (arg == L"--gui") {}
         else positional.emplace_back(arg);
     }
@@ -940,12 +1136,34 @@ int run_cli(int argc, wchar_t** argv) {
     options.output = positional.size() > 2 ? positional[2] : songFolder.parent_path() / (songFolder.filename().wstring() + L"_mod");
     try {
         std::vector<fs::path> files;
-        for (const auto& entry : fs::directory_iterator(songFolder))
-            if (entry.is_regular_file()) files.push_back(entry.path());
+        for (const auto& entry : fs::directory_iterator(songFolder)) {
+            if (!entry.is_regular_file()) continue;
+            static const std::set<std::string> imageExtensions{".png", ".jpg", ".jpeg", ".webp", ".bmp", ".gif", ".avif", ".tif", ".tiff", ".ico"};
+            if (imageExtensions.contains(lower(narrow(entry.path().extension().wstring())))) continue;
+            const auto matchesImage = [&](const auto& item) {
+                std::error_code error;
+                return fs::equivalent(entry.path(), item.second, error);
+            };
+            if (std::any_of(trackArtwork.begin(), trackArtwork.end(), matchesImage) ||
+                std::any_of(options.playlist_artwork.begin(), options.playlist_artwork.end(), matchesImage)) continue;
+            files.push_back(entry.path());
+        }
         std::ranges::sort(files);
         if (files.empty()) throw std::runtime_error("No songs in " + narrow(songFolder.wstring()));
 
-        const auto songs = music::scan(files);
+        auto songs = music::scan(files);
+        for (const auto& [id, image] : trackArtwork) {
+            const auto found = std::find_if(songs.begin(), songs.end(), [&](const auto& song) {
+                return song.artist + " - " + song.title == id;
+            });
+            if (found == songs.end()) throw std::runtime_error("Artwork names an unknown track: " + id);
+            found->artwork = image;
+        }
+        for (const auto& [name, image] : options.playlist_artwork) {
+            if (name != options.playlist) throw std::runtime_error("Artwork names an unknown playlist: " + name);
+        }
+        for (const auto& name : options.generated_playlist_artwork)
+            if (name != options.playlist) throw std::runtime_error("Generated artwork names an unknown playlist: " + name);
         const auto result = music::pack(options, songs, [&](const music::Progress& step) {
             const std::string stage = step.stage;
             if (stage == "encoding") std::printf("%s - %s\n", songs[step.song].artist.c_str(), songs[step.song].title.c_str());
@@ -1018,6 +1236,7 @@ int run_gui(HINSTANCE instance, int /*cmd_show*/) {
 
     auto app_storage = std::make_unique<App>();
     auto& app = *app_storage;
+    app.renderer = &renderer;
     g_app = &app;
     app.settings = load_settings();
     app.ffmpeg = find_ffmpeg(app.settings.ffmpeg);
@@ -1044,6 +1263,7 @@ int run_gui(HINSTANCE instance, int /*cmd_show*/) {
     }
     app.cancel = true;
     if (app.worker.joinable()) app.worker.join();
+    if (app.artwork_preview) renderer.release_texture(app.artwork_preview);
     g_app = nullptr;
     renderer.shutdown();
     ImGui_ImplWin32_Shutdown();

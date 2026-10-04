@@ -82,9 +82,9 @@ configure_strict_target(engine)
 target_link_libraries(engine PUBLIC lz4 miniz zstd)
 
 # 6. Packer Core Library
-add_library(music_packer_lib STATIC src/packer.cpp)
+add_library(music_packer_lib STATIC src/packer.cpp src/artwork.cpp)
 configure_strict_target(music_packer_lib)
-target_link_libraries(music_packer_lib PUBLIC engine bcrypt ole32)
+target_link_libraries(music_packer_lib PUBLIC engine bcrypt ole32 gdi32 windowscodecs)
 
 # 7. Main Application (unified CLI + GUI, WIN32 subsystem)
 add_executable(ReSkateMusicPacker WIN32
@@ -109,3 +109,7 @@ configure_strict_target(ReSkateMusicPackerTests)
 target_link_libraries(ReSkateMusicPackerTests PRIVATE music_packer_lib)
 enable_testing()
 add_test(NAME music_packer_tests COMMAND ReSkateMusicPackerTests)
+add_executable(ReSkateArtworkTests test/artwork_tests.cpp)
+configure_strict_target(ReSkateArtworkTests)
+target_link_libraries(ReSkateArtworkTests PRIVATE music_packer_lib)
+add_test(NAME artwork_tests COMMAND ReSkateArtworkTests "${CMAKE_BINARY_DIR}/artwork-preview.png")

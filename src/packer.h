@@ -6,7 +6,9 @@
 #include <cstddef>
 #include <filesystem>
 #include <functional>
+#include <map>
 #include <span>
+#include <set>
 #include <stdexcept>
 #include <string>
 #include <vector>
@@ -19,6 +21,8 @@ struct SongInfo {
     std::string playlist;                  // custom playlist; if empty, uses PackOptions.playlist
     double seconds = 0;
     std::vector<std::string> problems;     // why the song may not pack; empty means fine
+    std::filesystem::path artwork;        // optional image; packed as a square PNG
+    bool has_embedded_artwork = false;    // detected by scan(); manual artwork overrides it
 };
 
 struct PackOptions {
@@ -27,6 +31,8 @@ struct PackOptions {
     std::string playlist;                  // the songs' playlist in the music menu
     int bitrate = 192;                     // kbps, 64-320
     bool normalize = true;                 // EBU R128 loudness normalization (-16 LUFS) via ffmpeg loudnorm
+    std::map<std::string, std::filesystem::path> playlist_artwork;
+    std::set<std::string> generated_playlist_artwork; // playlist names; manual images take priority
 };
 
 // One step of pack(). `stage` is "encoding" (detail empty), "encoded" (detail: length, packets
@@ -54,6 +60,13 @@ bool usable_name(const std::string& text);
 // Tags and length of each file, without encoding. Never throws for a bad file: that is a problem entry.
 std::vector<SongInfo> scan(std::span<const std::filesystem::path> files);
 
+// Extracts the first attached picture into the encode cache. Empty if none or unreadable.
+std::filesystem::path embedded_artwork(const std::filesystem::path& track);
+// Proportionally resized 512x512 PNG with dark padding; shared by packing and previews.
+std::vector<std::byte> image_artwork_png(const std::filesystem::path& image);
+// Deterministic 512x512 text cover, also used by the GUI preview. UTF-8 playlist name.
+std::vector<std::byte> playlist_artwork_png(const std::string& name);
+
 // Builds the mod into options.output (any files already there are overwritten). Throws
 // std::runtime_error with a message fit to show, or Cancelled. `progress` and `cancel` may be null;
 // cancel is checked between songs. Songs keep their given order; artist/title override the tags.
@@ -67,6 +80,8 @@ struct Project {
     int bitrate = 192;
     bool normalize = true;
     std::vector<SongInfo> songs;   // file, artist and title; scan() the files for length and problems
+    std::map<std::string, std::filesystem::path> playlist_artwork;
+    std::set<std::string> generated_playlist_artwork;
 };
 // Throws std::runtime_error, with a message fit to show, when the folder has no project or a bad one.
 Project load_project(const std::filesystem::path& mod);
