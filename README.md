@@ -31,8 +31,11 @@ and stacks with other mods.
 ## Requirements
 
 - Windows 10/11 (x64).
-- **[ffmpeg](https://ffmpeg.org/) and ffprobe** on your `PATH`, or in a folder you point the GUI at.
-  They do the decoding, Opus encoding, album-art extraction, and loudness measurement.
+- **[ffmpeg](https://ffmpeg.org/) and ffprobe** on your `PATH`, or in a folder you point the GUI at. They do the decoding,
+  Opus encoding, album-art extraction, and loudness measurement. ffmpeg is only needed to *build* mods,
+  not to play them in game.
+- **No installer and no Visual C++ redistributable.** The executable is self-contained (statically
+  linked) and uses only Windows system libraries.
 - A **ReSkate runtime that reads `reskate-music.json`** (mod playlists). Cover art additionally needs
   the runtime's mod-artwork support.
 
