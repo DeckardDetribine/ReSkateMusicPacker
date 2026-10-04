@@ -1,68 +1,89 @@
 # ReSkate Music Packer
 
-A standalone hybrid GUI and CLI tool that packages audio files into native **skate.** music mods for **ReSkate**.
+A standalone Windows tool (GUI **and** CLI) that turns your audio files into add-only music mods for
+**skate.** running on [ReSkate](https://github.com/Dingo-Shenanigans/ReSkate). It adds new songs and
+custom playlists to the game's music without replacing any shipped files, so it survives game updates
+and stacks with other mods.
 
-Mods built with this tool add new songs and custom playlists into the game's audio engine without replacing any existing files.
+- **Documentation:** [`docs/`](docs/index.md)
+- **License:** [MIT](LICENSE)
 
 ## Features
 
-- **Hybrid GUI & CLI**:
-  - Run with no arguments or double-click in Explorer to launch the Dear ImGui DirectX 12 graphical interface.
-  - Run from PowerShell / Command Prompt with arguments for headless scripted batch packing.
-- **Transcode & Encode Cache**: Hashed Opus caching (`%LOCALAPPDATA%\ReSkateMusicPacker\cache\`) avoids re-encoding unchanged tracks across rebuilds.
-- **EBU R128 Loudness Normalization**: Normalizes tracks to -16 LUFS via FFmpeg `loudnorm` filter (enabled by default).
-- **Multiple Playlists per Mod**: Custom playlists per track, visible in the in-game music menu.
-- **Track & Playlist Artwork**: Embedded album art is extracted automatically. Through **Artwork...**, choose an override image or enable **Generate text cover** for a playlist, with a preview. Covers are 512x512 PNGs saved with the mod and included in Thunderstore exports. Requires a ReSkate runtime with mod artwork support.
-- **Thunderstore Export**: Direct generation of Thunderstore-compatible `.zip` packages complete with `manifest.json`, generated `README.md` tracklists, and auto-generated or custom 256x256 icons.
-- **Song Clash Warning**: Checks artist and title against already-installed mods and game soundtrack to prevent asset ID collisions.
-- **High-DPI Scaling**: Per-monitor v2 DPI awareness for crisp visuals on 4K and multi-monitor setups.
+- **Hybrid GUI & CLI** - double-click for a Dear ImGui DirectX 12 window, or script it from the
+  command line for batch packing.
+- **Add-only mods** - songs are added, never replacing the game's own tracks.
+- **Custom playlists** - group songs into named playlists that appear in the in-game music menu.
+- **Track & playlist artwork** - embedded album art is extracted automatically; pick your own image or
+  generate a text cover, with a live preview. Covers are 512x512 PNGs saved with the mod.
+- **Match the game's loudness** - EBU R128 two-pass `loudnorm` to **-15 LUFS** (true peak -1.5 dBTP),
+  the level of the game's own tracks, so mod songs don't sound quiet next to them.
+- **Encode cache** - transcoded Opus is cached by source hash, so rebuilding only re-encodes what
+  changed.
+- **Song clash warning** - checks artist/title against installed mods and the game's soundtrack so you
+  don't collide with an existing song id.
+- **Thunderstore export** - one click to a Thunderstore-ready `.zip` (`manifest.json`, generated
+  README/tracklist, 256x256 icon).
+- **High-DPI aware** - per-monitor v2 DPI scaling.
 
-## CLI Usage
+## Requirements
 
-```text
-ReSkateMusicPacker.exe <game folder> <song folder> [output folder] [options]
-```
+- Windows 10/11 (x64).
+- **[ffmpeg](https://ffmpeg.org/) and ffprobe** on your `PATH`, or in a folder you point the GUI at.
+  They do the decoding, Opus encoding, album-art extraction, and loudness measurement.
+- A **ReSkate runtime that reads `reskate-music.json`** (mod playlists). Cover art additionally needs
+  the runtime's mod-artwork support.
 
-### Options
+## Quick start (GUI)
 
-| Flag | Description | Default |
-|------|-------------|---------|
-| `--name <mod name>` | Name of the mod | Folder name |
-| `--playlist <playlist>` | Default in-game playlist name | Folder name |
-| `--bitrate <kbps>` | Opus bitrate (64-320 kbps) | `192` |
-| `--no-normalize` | Disable EBU R128 loudness normalization | Normalized |
-| `--thunderstore` | Export Thunderstore-ready zip package | Off |
-| `--author <name>` | Author namespace in Thunderstore manifest | `Author` |
-| `--version <x.y.z>` | Semantic version string | `1.0.0` |
-| `--playlist-artwork <name> <image>` | Cover image for the named playlist | None |
-| `--track-artwork <id> <image>` | Cover image for the exact `Artist - Title` song ID; repeat for several tracks | None |
-| `--generate-playlist-artwork <name>` | Generate a text cover using the playlist name | Off |
-| `--gui` | Force launch graphical user interface | |
-| `--help`, `-h` | Display command-line usage | |
+1. Run `ReSkateMusicPacker.exe` with no arguments (or double-click it).
+2. Set your **game folder** (the one containing `Skate.exe`) and, if ffmpeg isn't on `PATH`, its
+   folder.
+3. Drop songs or a folder onto the window (or use **Add songs...**), then set the mod name and
+   playlist.
+4. Optionally open **Artwork...** to override track art or generate a playlist cover.
+5. **Build**. The mod folder is written next to your songs (or to the output folder you choose). Copy
+   it into `F:\...\Mods\` (your ReSkate `Mods` folder) and enable it in the launcher.
+
+## Quick start (CLI)
 
 ```powershell
-ReSkateMusicPacker.exe "F:\Games\ReSkate-1.0.0" "C:\Music\My Mix" --playlist "My Mix" --playlist-artwork "My Mix" "C:\Pictures\mix.jpg" --track-artwork "Artist - Title" "C:\Pictures\track.png"
+ReSkateMusicPacker.exe "<game folder>" "<song folder>" [output folder] `
+    --name "My Mix" --playlist "My Mix" `
+    --playlist-artwork "My Mix" "cover.png" `
+    --track-artwork "Artist - Title" "track.png"
 ```
 
-PNG, JPEG, WebP and BMP images can be selected in the GUI. The project file preserves the original image paths, so keep the source images for future edits. The packed mod contains its own PNG copies and needs no source images or external image host to display covers. Older ReSkate builds ignore the optional artwork fields and continue to load the music.
+See the [CLI reference](docs/cli.md) for every option.
 
-Rectangular images are resized proportionally to fit the square cover, with dark padding around the edges. No artwork is cropped or stretched, and previews use the same conversion as packing.
+## Supported audio
 
-Preview extraction and image decoding run in the background, with a loading message while the window stays responsive. Previews share the scan/build worker so the packer's temporary files are never used by concurrent jobs.
+Anything ffmpeg can decode. The GUI file picker and the drop handler list
+`.mp3 .flac .ogg .opus .wav .m4a .aac .wma .aiff .aif .webm .mka .mp4`; the CLI scans a folder for
+non-image files and lets ffmpeg decide. Audio is encoded to stereo 48 kHz Opus (default 192 kbps,
+64-320).
 
-For tracks, an explicitly selected image overrides embedded album art. Only attached pictures are extracted; ordinary video streams are ignored. Missing or unreadable embedded art does not block packing. Extraction is cached by the track's content hash.
+## What it produces
 
-For playlists, a selected image takes priority over a generated text cover; otherwise the first track with available artwork supplies the cover. The text generator fits and wraps the playlist name on a colored background, including long words and Unicode names. Generated covers need no image file and their settings are saved with the project.
+A ReSkate mod folder containing the add-only content (a TOC + `.cas` with the new `_mg`/`_nwa` assets
+and audio chunks), a `reskate-music.json` describing your playlists and covers, the artwork PNGs, and
+the project/build files so the mod can be reopened and rebuilt. See
+[The mod format](docs/mod-format.md).
+
+## Documentation
+
+| Guide | Contents |
+|---|---|
+| [Getting started](docs/getting-started.md) | Install, GUI walkthrough, getting it into the game |
+| [CLI reference](docs/cli.md) | Every flag, with examples and batch use |
+| [The mod format](docs/mod-format.md) | What's in a mod, `reskate-music.json`, artwork, ReSkate requirements |
+| [Building from source](docs/building.md) | Prerequisites and CMake |
+| [Troubleshooting](docs/troubleshooting.md) | ffmpeg, clash warnings, missing covers, loudness, Thunderstore |
 
 ## Building
 
-Requires Visual Studio 2022 (v143 toolset) and CMake 3.20+.
+Requires Visual Studio 2022 (v143) and CMake 3.20+. See [docs/building.md](docs/building.md).
 
-```powershell
-cmake -B build/vs2022-x64 -G "Visual Studio 17 2022" -A x64
-cmake --build build/vs2022-x64 --config Release
-```
+## License
 
-The resulting binaries will be placed in `build/vs2022-x64/Release/`:
-- `ReSkateMusicPacker.exe` (Unified GUI & CLI application)
-- `ReSkateMusicPackerTests.exe` (Automated regression test suite)
+[MIT](LICENSE). Bundled third-party libraries under `External/` keep their own licenses.

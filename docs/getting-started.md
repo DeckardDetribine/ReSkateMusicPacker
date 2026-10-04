@@ -1,0 +1,50 @@
+# Getting started
+
+## What you need
+
+- **Windows 10/11 (x64).**
+- **ffmpeg and ffprobe** on your `PATH`, or in a folder you point the tool at. They handle decoding,
+  Opus encoding, album-art extraction, and loudness measurement. Get them from
+  [ffmpeg.org](https://ffmpeg.org/download.html) (a full build includes both binaries).
+- A **ReSkate runtime** that reads `reskate-music.json` (mod playlists). Artwork needs the runtime's
+  mod-artwork support as well.
+- Your **game folder**: the ReSkate install containing `Skate.exe` (e.g. `F:\Games\ReSkate-1.0.0`).
+  The packer reads the game's audio templates from it.
+
+## Building the packer
+
+If you don't have a release build, see [Building from source](building.md).
+
+## The GUI
+
+Run `ReSkateMusicPacker.exe` with no arguments, or double-click it.
+
+1. **Game folder** - point it at the install with `Skate.exe`. The tool checks for the file.
+2. **ffmpeg** - if ffmpeg/ffprobe aren't on `PATH`, point this at the folder containing them. Both
+   settings are remembered in `%APPDATA%\ReSkateMusicPacker\settings.json`.
+3. **Add songs** - drag files or a folder onto the window, or use the picker. Each song shows its
+   artist/title (from tags, else the file name) and an artwork thumbnail.
+4. **Name and playlist** - give the mod a name and the playlist it should appear under in the in-game
+   music menu. Songs can also be assigned to their own playlists for a multi-playlist mod.
+5. **Artwork (optional)** - open **Artwork...** to override a song's cover, or generate a text cover
+   for a playlist. Covers are converted to 512x512 PNGs and saved with the mod; **Use automatic**
+   falls back to embedded album art.
+6. **Build** - the progress bar runs encoding, then building the mod. The mod folder is written next
+   to your songs (or to the output folder you chose), and its project file is saved inside so you can
+   **reopen and rebuild** it later.
+7. **Export Thunderstore... (optional)** - produces an upload-ready `.zip` (see the
+   [CLI reference](cli.md#thunderstore) for what it contains).
+
+## Getting your mod into the game
+
+Copy the built mod folder into your ReSkate `Mods` folder and enable it in the launcher. ReSkate
+merges mod content at launch; the songs appear in the music menu under your playlist.
+
+Keep the mod folder (and its `reskate-music-project.json`) if you want to edit and rebuild it later -
+the project records where your source audio and images are.
+
+## Loudness
+
+Songs are normalised to **-15 LUFS** (true peak -1.5 dBTP) using two-pass ffmpeg `loudnorm`, matching
+the level of the game's own tracks so mod songs don't sound quiet beside them. Pass `--no-normalize`
+(or untick it in the GUI) to disable this.
