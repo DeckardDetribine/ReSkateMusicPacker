@@ -81,7 +81,7 @@ struct Settings {
 fs::path settings_file() {
     PWSTR roaming{};
     fs::path folder;
-    if (SUCCEEDED(SHGetKnownFolderPath(FOLDERID_RoamingAppData, 0, nullptr, &roaming))) folder = fs::path(roaming) / L"ReSkateMusicMaker";
+    if (SUCCEEDED(SHGetKnownFolderPath(FOLDERID_RoamingAppData, 0, nullptr, &roaming))) folder = fs::path(roaming) / L"ReSkateMusicPacker";
     CoTaskMemFree(roaming);
     return folder / L"settings.json";
 }
@@ -478,9 +478,98 @@ void build(App& app) {
 }
 
 // ---- Drawing -------------------------------------------------------------------------------------
+void apply_theme() {
+    auto& style = ImGui::GetStyle();
+
+    style.WindowPadding     = ImVec2(S(16.0f), S(14.0f));
+    style.FramePadding      = ImVec2(S(8.0f),  S(5.0f));
+    style.CellPadding       = ImVec2(S(8.0f),  S(5.0f));
+    style.ItemSpacing       = ImVec2(S(8.0f),  S(8.0f));
+    style.ItemInnerSpacing  = ImVec2(S(6.0f),  S(6.0f));
+    style.ScrollbarSize     = S(13.0f);
+    style.GrabMinSize       = S(10.0f);
+
+    style.WindowRounding    = S(0.0f);
+    style.ChildRounding     = S(4.0f);
+    style.FrameRounding     = S(4.0f);
+    style.PopupRounding     = S(5.0f);
+    style.ScrollbarRounding = S(6.0f);
+    style.GrabRounding      = S(3.0f);
+    style.TabRounding       = S(4.0f);
+
+    style.WindowBorderSize  = 0.0f;
+    style.FrameBorderSize   = 1.0f;
+    style.PopupBorderSize   = 1.0f;
+
+    ImVec4* colors = style.Colors;
+    colors[ImGuiCol_WindowBg]             = ImVec4(0.11f, 0.12f, 0.14f, 1.00f);
+    colors[ImGuiCol_ChildBg]              = ImVec4(0.12f, 0.13f, 0.16f, 1.00f);
+    colors[ImGuiCol_PopupBg]              = ImVec4(0.13f, 0.14f, 0.17f, 0.98f);
+    colors[ImGuiCol_Border]               = ImVec4(0.22f, 0.24f, 0.28f, 0.70f);
+    colors[ImGuiCol_BorderShadow]         = ImVec4(0.00f, 0.00f, 0.00f, 0.00f);
+
+    colors[ImGuiCol_Text]                 = ImVec4(0.92f, 0.93f, 0.95f, 1.00f);
+    colors[ImGuiCol_TextDisabled]         = ImVec4(0.50f, 0.54f, 0.58f, 1.00f);
+
+    colors[ImGuiCol_FrameBg]              = ImVec4(0.16f, 0.18f, 0.22f, 1.00f);
+    colors[ImGuiCol_FrameBgHovered]       = ImVec4(0.21f, 0.24f, 0.30f, 1.00f);
+    colors[ImGuiCol_FrameBgActive]        = ImVec4(0.25f, 0.29f, 0.36f, 1.00f);
+
+    colors[ImGuiCol_TitleBg]              = ImVec4(0.09f, 0.10f, 0.12f, 1.00f);
+    colors[ImGuiCol_TitleBgActive]        = ImVec4(0.11f, 0.12f, 0.15f, 1.00f);
+    colors[ImGuiCol_TitleBgCollapsed]     = ImVec4(0.09f, 0.10f, 0.12f, 0.75f);
+    colors[ImGuiCol_MenuBarBg]            = ImVec4(0.13f, 0.14f, 0.17f, 1.00f);
+
+    colors[ImGuiCol_ScrollbarBg]          = ImVec4(0.10f, 0.11f, 0.13f, 0.50f);
+    colors[ImGuiCol_ScrollbarGrab]        = ImVec4(0.26f, 0.29f, 0.35f, 0.80f);
+    colors[ImGuiCol_ScrollbarGrabHovered] = ImVec4(0.34f, 0.38f, 0.46f, 0.90f);
+    colors[ImGuiCol_ScrollbarGrabActive]  = ImVec4(0.42f, 0.47f, 0.56f, 1.00f);
+
+    colors[ImGuiCol_CheckMark]            = ImVec4(0.22f, 0.65f, 1.00f, 1.00f);
+    colors[ImGuiCol_SliderGrab]           = ImVec4(0.22f, 0.58f, 0.95f, 0.90f);
+    colors[ImGuiCol_SliderGrabActive]     = ImVec4(0.30f, 0.68f, 1.00f, 1.00f);
+
+    colors[ImGuiCol_Button]               = ImVec4(0.19f, 0.22f, 0.27f, 1.00f);
+    colors[ImGuiCol_ButtonHovered]        = ImVec4(0.26f, 0.31f, 0.39f, 1.00f);
+    colors[ImGuiCol_ButtonActive]         = ImVec4(0.16f, 0.20f, 0.25f, 1.00f);
+
+    colors[ImGuiCol_Header]               = ImVec4(0.18f, 0.21f, 0.26f, 1.00f);
+    colors[ImGuiCol_HeaderHovered]        = ImVec4(0.24f, 0.28f, 0.35f, 1.00f);
+    colors[ImGuiCol_HeaderActive]         = ImVec4(0.28f, 0.34f, 0.42f, 1.00f);
+
+    colors[ImGuiCol_Separator]            = ImVec4(0.22f, 0.24f, 0.28f, 0.80f);
+    colors[ImGuiCol_SeparatorHovered]     = ImVec4(0.28f, 0.32f, 0.38f, 0.90f);
+    colors[ImGuiCol_SeparatorActive]      = ImVec4(0.35f, 0.42f, 0.52f, 1.00f);
+
+    colors[ImGuiCol_ResizeGrip]           = ImVec4(0.22f, 0.58f, 0.95f, 0.25f);
+    colors[ImGuiCol_ResizeGripHovered]    = ImVec4(0.22f, 0.58f, 0.95f, 0.67f);
+    colors[ImGuiCol_ResizeGripActive]     = ImVec4(0.22f, 0.58f, 0.95f, 0.95f);
+
+    colors[ImGuiCol_TableHeaderBg]        = ImVec4(0.15f, 0.17f, 0.21f, 1.00f);
+    colors[ImGuiCol_TableBorderStrong]    = ImVec4(0.22f, 0.25f, 0.30f, 1.00f);
+    colors[ImGuiCol_TableBorderLight]     = ImVec4(0.18f, 0.20f, 0.24f, 0.70f);
+    colors[ImGuiCol_TableRowBg]           = ImVec4(0.12f, 0.13f, 0.16f, 0.70f);
+    colors[ImGuiCol_TableRowBgAlt]        = ImVec4(0.14f, 0.15f, 0.18f, 0.70f);
+
+    colors[ImGuiCol_Tab]                  = ImVec4(0.15f, 0.17f, 0.21f, 1.00f);
+    colors[ImGuiCol_TabHovered]           = ImVec4(0.24f, 0.28f, 0.35f, 1.00f);
+    colors[ImGuiCol_TabActive]            = ImVec4(0.19f, 0.23f, 0.29f, 1.00f);
+    colors[ImGuiCol_TabUnfocused]         = ImVec4(0.13f, 0.14f, 0.17f, 1.00f);
+    colors[ImGuiCol_TabUnfocusedActive]   = ImVec4(0.16f, 0.18f, 0.23f, 1.00f);
+
+    colors[ImGuiCol_PlotHistogram]        = ImVec4(0.18f, 0.52f, 0.92f, 1.00f);
+    colors[ImGuiCol_PlotHistogramHovered] = ImVec4(0.25f, 0.60f, 1.00f, 1.00f);
+
+    colors[ImGuiCol_ModalWindowDimBg]     = ImVec4(0.05f, 0.05f, 0.07f, 0.65f);
+}
+
 void setup_page(App& app, HWND window) {
+    ImGui::Spacing();
+    ImGui::TextColored(ImVec4(0.22f, 0.65f, 1.0f, 1.0f), "Game Setup");
+    ImGui::Spacing();
     ImGui::TextWrapped("Pick the folder skate. is installed in (the one with Skate.exe and ReSkateLauncher.exe).");
-    if (ImGui::Button("Choose the game folder...")) {
+    ImGui::Spacing();
+    if (ImGui::Button("Choose the game folder...", ImVec2(S(220), S(32)))) {
         const auto folders = pick(window, true);
         if (!folders.empty()) {
             if (game_folder(folders[0])) {
@@ -494,13 +583,17 @@ void setup_page(App& app, HWND window) {
 }
 
 void ffmpeg_page(App& app, HWND window) {
-    ImGui::TextWrapped("The music maker uses ffmpeg to read and encode songs, and cannot find ffmpeg.exe and ffprobe.exe. "
+    ImGui::Spacing();
+    ImGui::TextColored(ImVec4(0.22f, 0.65f, 1.0f, 1.0f), "FFmpeg Dependency Required");
+    ImGui::Spacing();
+    ImGui::TextWrapped("The music packer uses ffmpeg to read and encode songs, and cannot find ffmpeg.exe and ffprobe.exe. "
                        "Install ffmpeg (for example a Windows build linked from the official download page), then "
                        "point at the folder that holds ffmpeg.exe.");
-    if (ImGui::Button("Open the ffmpeg download page"))
+    ImGui::Spacing();
+    if (ImGui::Button("Open the ffmpeg download page", ImVec2(S(240), S(32))))
         ShellExecuteW(nullptr, L"open", L"https://ffmpeg.org/download.html", nullptr, nullptr, SW_SHOWNORMAL);
     ImGui::SameLine();
-    if (ImGui::Button("Locate ffmpeg...")) {
+    if (ImGui::Button("Locate ffmpeg...", ImVec2(S(160), S(32)))) {
         const auto folders = pick(window, true);
         if (!folders.empty()) {
             auto folder = folders[0];
@@ -519,7 +612,7 @@ void songs_page(App& app, HWND window) {
     const bool busy = app.busy;
     // The mod: name, playlist, quality, and where it goes.
     ImGui::BeginDisabled(busy);
-    if (ImGui::Button("New")) {
+    if (ImGui::Button("New Mod")) {
         app.rows.clear();
         app.output.clear();
         app.name.fill(0);
@@ -528,27 +621,32 @@ void songs_page(App& app, HWND window) {
         set_status(app, "");
     }
     ImGui::SameLine();
-    if (ImGui::Button("Open...")) {
+    if (ImGui::Button("Open Mod...")) {
         const auto folders = pick(window, true);
         if (!folders.empty()) open_mod(app, folders[0]);
     }
-    ImGui::SameLine(0, S(24));
-    ImGui::SetNextItemWidth(S(220));
+    ImGui::SameLine(0, S(20));
+    ImGui::SetNextItemWidth(S(200));
     if (ImGui::InputTextWithHint("##name", "Mod name", app.name.data(), app.name.size()) && !app.output.empty() &&
         app.output.parent_path() == app.settings.game / L"Mods")
         app.output.clear(); // a renamed new mod goes to its new folder; an opened one stays where it is
+    if (ImGui::IsItemHovered()) ImGui::SetTooltip("Mod name (used for the mod folder in Mods/)");
     ImGui::SameLine();
-    ImGui::SetNextItemWidth(S(220));
-    ImGui::InputTextWithHint("##playlist", "Playlist name (shown in the game)", app.playlist.data(), app.playlist.size());
+    ImGui::SetNextItemWidth(S(200));
+    ImGui::InputTextWithHint("##playlist", "Playlist name (in-game)", app.playlist.data(), app.playlist.size());
+    if (ImGui::IsItemHovered()) ImGui::SetTooltip("Playlist name shown in skate. audio settings");
     ImGui::SameLine();
-    ImGui::SetNextItemWidth(S(110));
-    ImGui::Combo("kbps", &app.bitrate, bitrates, 5);
+    ImGui::SetNextItemWidth(S(85));
+    ImGui::Combo("##bitrate", &app.bitrate, bitrates, 5);
+    if (ImGui::IsItemHovered()) ImGui::SetTooltip("Opus audio bitrate (kbps)");
     ImGui::SameLine();
     ImGui::Checkbox("Normalize", &app.normalize);
     if (ImGui::IsItemHovered()) ImGui::SetTooltip("Equalise track loudness using EBU R128 (-16 LUFS)");
     ImGui::EndDisabled();
-    ImGui::TextDisabled("Builds into %s", narrow(output_folder(app).wstring()).c_str());
-    ImGui::Separator();
+
+    ImGui::Spacing();
+    ImGui::TextDisabled("Builds into: %s", narrow(output_folder(app).wstring()).c_str());
+    ImGui::Spacing();
 
     // The songs.
     std::vector<std::vector<std::string>> problems(app.rows.size());
@@ -557,18 +655,20 @@ void songs_page(App& app, HWND window) {
         problems[i] = row_problems(app, i);
         if (!problems[i].empty()) ++blocked;
     }
-    const float footer = ImGui::GetFrameHeightWithSpacing() * 3;
+    const float footer = ImGui::GetFrameHeightWithSpacing() * 3.5f + S(8.0f);
     std::optional<std::size_t> remove, up, down;
-    if (ImGui::BeginTable("songs", 7, ImGuiTableFlags_RowBg | ImGuiTableFlags_BordersInnerH | ImGuiTableFlags_ScrollY,
+    if (ImGui::BeginTable("songs", 7,
+                          ImGuiTableFlags_RowBg | ImGuiTableFlags_BordersOuter | ImGuiTableFlags_BordersInnerH |
+                              ImGuiTableFlags_ScrollY | ImGuiTableFlags_Resizable,
                           ImVec2(0, ImGui::GetContentRegionAvail().y - footer))) {
         ImGui::TableSetupScrollFreeze(0, 1);
-        ImGui::TableSetupColumn("#", ImGuiTableColumnFlags_WidthFixed, S(28));
-        ImGui::TableSetupColumn("Artist", ImGuiTableColumnFlags_WidthStretch, 1);
-        ImGui::TableSetupColumn("Title", ImGuiTableColumnFlags_WidthStretch, 1.2f);
+        ImGui::TableSetupColumn("#", ImGuiTableColumnFlags_WidthFixed, S(32));
+        ImGui::TableSetupColumn("Artist", ImGuiTableColumnFlags_WidthStretch, 1.1f);
+        ImGui::TableSetupColumn("Title", ImGuiTableColumnFlags_WidthStretch, 1.3f);
         ImGui::TableSetupColumn("Playlist", ImGuiTableColumnFlags_WidthStretch, 0.9f);
-        ImGui::TableSetupColumn("Length", ImGuiTableColumnFlags_WidthFixed, S(56));
-        ImGui::TableSetupColumn("Problems", ImGuiTableColumnFlags_WidthStretch, 1);
-        ImGui::TableSetupColumn("", ImGuiTableColumnFlags_WidthFixed, S(96));
+        ImGui::TableSetupColumn("Length", ImGuiTableColumnFlags_WidthFixed, S(64));
+        ImGui::TableSetupColumn("Problems", ImGuiTableColumnFlags_WidthStretch, 1.0f);
+        ImGui::TableSetupColumn("Actions", ImGuiTableColumnFlags_WidthFixed, S(160));
         ImGui::TableHeadersRow();
         for (std::size_t i = 0; i < app.rows.size(); ++i) {
             auto& row = app.rows[i];
@@ -600,10 +700,17 @@ void songs_page(App& app, HWND window) {
             ImGui::TableNextColumn();
             ImGui::BeginDisabled(busy);
             if (ImGui::ArrowButton("up", ImGuiDir_Up) && i > 0) up = i;
+            if (ImGui::IsItemHovered()) ImGui::SetTooltip("Move song up");
             ImGui::SameLine();
             if (ImGui::ArrowButton("down", ImGuiDir_Down) && i + 1 < app.rows.size()) down = i;
+            if (ImGui::IsItemHovered()) ImGui::SetTooltip("Move song down");
             ImGui::SameLine();
-            if (ImGui::SmallButton("Remove")) remove = i;
+            ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.48f, 0.16f, 0.16f, 0.85f));
+            ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(0.68f, 0.22f, 0.22f, 1.00f));
+            ImGui::PushStyleColor(ImGuiCol_ButtonActive, ImVec4(0.78f, 0.15f, 0.15f, 1.00f));
+            if (ImGui::Button("Remove")) remove = i;
+            ImGui::PopStyleColor(3);
+            if (ImGui::IsItemHovered()) ImGui::SetTooltip("Remove this song");
             ImGui::EndDisabled();
             ImGui::PopID();
         }
@@ -613,13 +720,14 @@ void songs_page(App& app, HWND window) {
     if (down) std::swap(app.rows[*down], app.rows[*down + 1]);
     if (remove) app.rows.erase(app.rows.begin() + static_cast<std::ptrdiff_t>(*remove));
 
+    ImGui::Spacing();
     // Footer: add songs, progress or status, build.
     ImGui::BeginDisabled(busy);
-    if (ImGui::Button("Add songs...")) add_files(app, pick(window, false));
+    if (ImGui::Button("Add songs...", ImVec2(S(120), S(26)))) add_files(app, pick(window, false));
     ImGui::EndDisabled();
     ImGui::SameLine();
     if (app.rows.empty()) ImGui::TextDisabled("Drop audio files or folders onto this window.");
-    else ImGui::TextDisabled("%zu song(s)", app.rows.size());
+    else ImGui::TextDisabled("%zu song(s) loaded", app.rows.size());
 
     std::string block;
     if (app.rows.empty()) block = "Add some songs.";
@@ -629,24 +737,30 @@ void songs_page(App& app, HWND window) {
     else if (std::any_of(app.rows.begin(), app.rows.end(), [](const Row& r) { return !r.scanned; })) block = "Reading the songs...";
     if (busy) {
         std::lock_guard lock(app.mutex);
-        ImGui::ProgressBar(app.progress, ImVec2(S(-120), 0), (app.job + ": " + app.progress_text).c_str());
+        ImGui::ProgressBar(app.progress, ImVec2(S(-120), S(26)), (app.job + ": " + app.progress_text).c_str());
         ImGui::SameLine();
-        if (ImGui::Button("Cancel", ImVec2(-1, 0))) app.cancel = true;
+        if (ImGui::Button("Cancel", ImVec2(-1, S(26)))) app.cancel = true;
     } else {
         if (!app.status.empty())
-            ImGui::TextColored(app.status_error ? ImVec4(1, 0.45f, 0.4f, 1) : ImVec4(0.55f, 0.85f, 0.55f, 1), "%s", app.status.c_str());
+            ImGui::TextColored(app.status_error ? ImVec4(1.0f, 0.45f, 0.40f, 1.0f) : ImVec4(0.40f, 0.85f, 0.50f, 1.0f), "%s", app.status.c_str());
         else if (!block.empty()) ImGui::TextDisabled("%s", block.c_str());
-        else if (game_running()) ImGui::TextColored(ImVec4(1, 0.8f, 0.4f, 1), "skate. is running: the mod takes effect the next time it starts.");
+        else if (game_running()) ImGui::TextColored(ImVec4(1.0f, 0.80f, 0.35f, 1.0f), "skate. is running: the mod takes effect the next time it starts.");
         else ImGui::TextUnformatted("");
+
         const float button_width = block.empty() ? (ImGui::GetContentRegionAvail().x - S(12)) * 0.68f : ImGui::GetContentRegionAvail().x;
         ImGui::BeginDisabled(!block.empty());
-        if (ImGui::Button(("Build into Mods\\" + narrow(output_folder(app).filename().wstring())).c_str(), ImVec2(button_width, 0))) {
+        ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.16f, 0.45f, 0.78f, 1.00f));
+        ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(0.22f, 0.54f, 0.90f, 1.00f));
+        ImGui::PushStyleColor(ImGuiCol_ButtonActive, ImVec4(0.13f, 0.38f, 0.68f, 1.00f));
+        if (ImGui::Button(("Build into Mods\\" + narrow(output_folder(app).filename().wstring())).c_str(), ImVec2(button_width, S(30)))) {
             set_status(app, "");
             build(app);
         }
+        ImGui::PopStyleColor(3);
+
         if (block.empty()) {
             ImGui::SameLine();
-            if (ImGui::Button("Export Thunderstore...", ImVec2(-1, 0))) {
+            if (ImGui::Button("Export Thunderstore...", ImVec2(-1, S(30)))) {
                 app.show_export_ts = true;
                 if (!app.ts_description[0]) {
                     copy_text(app.ts_description, "Adds " + std::to_string(app.rows.size()) + " song(s) to skate.");
@@ -661,22 +775,24 @@ void songs_page(App& app, HWND window) {
         app.show_export_ts = false;
     }
     if (ImGui::BeginPopupModal("Export Thunderstore Package", nullptr, ImGuiWindowFlags_AlwaysAutoResize)) {
+        ImGui::Spacing();
         ImGui::Text("Export a Thunderstore-compatible .zip package ready for upload.");
         ImGui::Spacing();
-        ImGui::SetNextItemWidth(S(300));
+        ImGui::SetNextItemWidth(S(320));
         ImGui::InputText("Author / Namespace", app.ts_author.data(), app.ts_author.size());
-        ImGui::SetNextItemWidth(S(300));
+        ImGui::SetNextItemWidth(S(320));
         ImGui::InputText("Version", app.ts_version.data(), app.ts_version.size());
-        ImGui::SetNextItemWidth(S(300));
+        ImGui::SetNextItemWidth(S(320));
         ImGui::InputText("Description", app.ts_description.data(), app.ts_description.size());
+        ImGui::Spacing();
         if (!app.ts_icon.empty()) {
             ImGui::Text("Icon: %s", narrow(app.ts_icon.filename().wstring()).c_str());
             ImGui::SameLine();
-            if (ImGui::SmallButton("Clear")) app.ts_icon.clear();
+            if (ImGui::Button("Clear")) app.ts_icon.clear();
         } else {
             ImGui::TextDisabled("Icon: Default (auto-generated 256x256)");
             ImGui::SameLine();
-            if (ImGui::SmallButton("Browse...")) {
+            if (ImGui::Button("Browse...")) {
                 const auto picked = pick(window, false);
                 if (!picked.empty()) app.ts_icon = picked[0];
             }
@@ -684,7 +800,10 @@ void songs_page(App& app, HWND window) {
         ImGui::Spacing();
         ImGui::Separator();
         ImGui::Spacing();
-        if (ImGui::Button("Export ZIP", ImVec2(S(140), 0))) {
+        ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.16f, 0.45f, 0.78f, 1.00f));
+        ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(0.22f, 0.54f, 0.90f, 1.00f));
+        ImGui::PushStyleColor(ImGuiCol_ButtonActive, ImVec4(0.13f, 0.38f, 0.68f, 1.00f));
+        if (ImGui::Button("Export ZIP", ImVec2(S(140), S(30)))) {
             try {
                 const auto mod = output_folder(app);
                 if (!fs::exists(mod / L"layout.toc")) {
@@ -704,8 +823,9 @@ void songs_page(App& app, HWND window) {
             }
             ImGui::CloseCurrentPopup();
         }
+        ImGui::PopStyleColor(3);
         ImGui::SameLine();
-        if (ImGui::Button("Cancel", ImVec2(S(100), 0))) {
+        if (ImGui::Button("Cancel", ImVec2(S(100), S(30)))) {
             ImGui::CloseCurrentPopup();
         }
         ImGui::EndPopup();
@@ -875,7 +995,7 @@ int run_gui(HINSTANCE instance, int /*cmd_show*/) {
     const int win_h = rect.bottom - rect.top;
     const int win_x = work.left + (static_cast<int>(work_width) - win_w) / 2;
     const int win_y = work.top + (static_cast<int>(work_height) - win_h) / 2;
-    const auto window = CreateWindowExW(0, type.lpszClassName, L"ReSkate Music Maker", style, win_x, win_y,
+    const auto window = CreateWindowExW(0, type.lpszClassName, L"ReSkate Music Packer", style, win_x, win_y,
                                         win_w, win_h, nullptr, nullptr, instance, nullptr);
     if (!window) return 1;
 
@@ -892,7 +1012,7 @@ int run_gui(HINSTANCE instance, int /*cmd_show*/) {
     ImGui_ImplWin32_Init(window);
     Renderer renderer;
     if (!renderer.init(window)) {
-        MessageBoxW(nullptr, L"This PC's graphics driver cannot draw the window.", L"ReSkate Music Maker", MB_ICONERROR);
+        MessageBoxW(nullptr, L"This PC's graphics driver cannot draw the window.", L"ReSkate Music Packer", MB_ICONERROR);
         return 1;
     }
 
