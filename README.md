@@ -5,6 +5,8 @@ A standalone Windows tool (GUI **and** CLI) that turns your audio files into add
 custom playlists to the game's music without replacing any shipped files, so it survives game updates
 and stacks with other mods.
 
+![The ReSkate Music Packer window](docs/images/screenshot.png)
+
 - **Documentation:** [`docs/`](docs/index.md)
 - **License:** [MIT](LICENSE)
 
