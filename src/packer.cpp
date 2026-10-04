@@ -276,9 +276,42 @@ Opus read_ogg_opus(std::span<const std::byte> ogg) {
     return result;
 }
 
+// The game's own tracks sit at about -15 LUFS (measured from the shipped UPM and licensed streams),
+// so normalise to that. Two passes: measure the input, then apply a linear gain so each song lands on
+// the target instead of the single-pass dynamic loudnorm's drift. The cache tag changes with the
+// target so an older -16 encode is not reused.
+constexpr char loudness_filter[] = "I=-15.0:TP=-1.5:LRA=11";
+constexpr char loudness_cache_tag[] = "_norm15";
+
+std::wstring loudness_af(const fs::path& file, const fs::path& scratch) {
+    const auto base = std::string("loudnorm=") + loudness_filter;
+    const auto jsonFile = scratch / L"loudnorm.json";
+    std::error_code ec;
+    fs::remove(jsonFile, ec);
+    try {
+        run(L"ffmpeg -hide_banner -nostats -i \"" + file.wstring() + L"\" -vn -map_metadata -1 -ac 2 -ar 48000 -af " +
+            widen(base) + L":print_format=json -f null - 2> \"" + jsonFile.wstring() + L"\"");
+        const auto bytes = read_file(jsonFile);
+        const std::string text(reinterpret_cast<const char*>(bytes.data()), bytes.size());
+        const auto start = text.rfind('{'), end = text.rfind('}');
+        if (start == std::string::npos || end == std::string::npos || end < start) return widen(base);
+        const auto root = Json::parse(text.substr(start, end - start + 1));
+        const auto value = [&](const char* key) {
+            return root.contains(key) && root.at(key).is_string() ? root.at(key).string() : std::string{};
+        };
+        const auto i = value("input_i"), lra = value("input_lra"), tp = value("input_tp");
+        const auto thresh = value("input_thresh"), offset = value("target_offset");
+        if (i.empty() || tp.empty()) return widen(base);
+        return widen(base + ":measured_I=" + i + ":measured_LRA=" + lra + ":measured_TP=" + tp +
+                     ":measured_thresh=" + thresh + ":offset=" + offset + ":linear=true");
+    } catch (const std::exception&) {
+        return widen(base); // measurement failed: fall back to the dynamic filter
+    }
+}
+
 EncodedOpus encode(const Song& song, int bitrate, bool normalize, const fs::path& scratch) {
     const auto fileSha = sha1_of_file(song.file);
-    const auto cacheKey = to_hex(fileSha) + "_" + std::to_string(bitrate) + "k" + (normalize ? "_norm" : "") + ".ogg";
+    const auto cacheKey = to_hex(fileSha) + "_" + std::to_string(bitrate) + "k" + (normalize ? loudness_cache_tag : "") + ".ogg";
     const auto cachedFile = cache_folder() / widen(cacheKey);
 
     std::error_code ec;
@@ -296,8 +329,8 @@ EncodedOpus encode(const Song& song, int bitrate, bool normalize, const fs::path
         fs::remove(cachedFile, ec);
     }
 
-    const auto ogg = scratch / (widen(to_hex(fileSha)) + L"_" + std::to_wstring(bitrate) + L"k" + (normalize ? L"_norm" : L"") + L".tmp.ogg");
-    const std::wstring af = normalize ? L"-af loudnorm=I=-16:TP=-1.5:LRA=11 " : L"";
+    const auto ogg = scratch / (widen(to_hex(fileSha)) + L"_" + std::to_wstring(bitrate) + L"k" + (normalize ? widen(loudness_cache_tag) : L"") + L".tmp.ogg");
+    const std::wstring af = normalize ? (L"-af " + loudness_af(song.file, scratch) + L" ") : L"";
     run(L"ffmpeg -y -v error -i \"" + song.file.wstring() + L"\" -vn -map_metadata -1 -ac 2 -ar 48000 " +
         af + L"-c:a libopus -b:a " + std::to_wstring(bitrate) + L"k -vbr on -frame_duration 20 "
         L"-application audio -f ogg \"" + ogg.wstring() + L"\"");
