@@ -622,24 +622,25 @@ void apply_theme() {
     auto& style = ImGui::GetStyle();
 
     style.WindowPadding     = ImVec2(S(16.0f), S(14.0f));
-    style.FramePadding      = ImVec2(S(8.0f),  S(5.0f));
-    style.CellPadding       = ImVec2(S(8.0f),  S(5.0f));
+    style.FramePadding      = ImVec2(S(9.0f),  S(6.0f));
+    style.CellPadding       = ImVec2(S(8.0f),  S(6.0f));
     style.ItemSpacing       = ImVec2(S(8.0f),  S(8.0f));
     style.ItemInnerSpacing  = ImVec2(S(6.0f),  S(6.0f));
     style.ScrollbarSize     = S(13.0f);
     style.GrabMinSize       = S(10.0f);
 
     style.WindowRounding    = S(0.0f);
-    style.ChildRounding     = S(4.0f);
-    style.FrameRounding     = S(4.0f);
-    style.PopupRounding     = S(5.0f);
+    style.ChildRounding     = S(8.0f);
+    style.FrameRounding     = S(6.0f);
+    style.PopupRounding     = S(8.0f);
     style.ScrollbarRounding = S(6.0f);
-    style.GrabRounding      = S(3.0f);
-    style.TabRounding       = S(4.0f);
+    style.GrabRounding      = S(4.0f);
+    style.TabRounding       = S(6.0f);
 
     style.WindowBorderSize  = 0.0f;
     style.FrameBorderSize   = 1.0f;
     style.PopupBorderSize   = 1.0f;
+
 
     ImVec4* colors = style.Colors;
     colors[ImGuiCol_WindowBg]             = ImVec4(0.11f, 0.12f, 0.14f, 1.00f);
@@ -824,35 +825,6 @@ void settings_modal(App& app, HWND window) {
 
 void songs_page(App& app, HWND window) {
     const bool busy = app.busy;
-    // The mod: name, playlist, quality, and where it goes.
-    ImGui::BeginDisabled(busy);
-    if (ImGui::Button("New Mod")) {
-        app.rows.clear();
-        app.output.clear();
-        app.name.fill(0);
-        app.playlist.fill(0);
-        app.normalize = true;
-        app.playlist_artwork.clear();
-        app.generated_playlist_artwork.clear();
-        clear_artwork_preview(app);
-        set_status(app, "");
-    }
-    ImGui::SameLine();
-    if (ImGui::Button("Open Mod...")) {
-        const auto folders = pick(window, true);
-        if (!folders.empty()) open_mod(app, folders[0]);
-    }
-    ImGui::SameLine(0, S(20));
-    ImGui::SetNextItemWidth(S(180));
-    if (ImGui::InputTextWithHint("##name", "Mod name", app.name.data(), app.name.size()) && !app.output.empty() &&
-        app.output.parent_path() == app.settings.game / L"Mods")
-        app.output.clear(); // a renamed new mod goes to its new folder; an opened one stays where it is
-    if (ImGui::IsItemHovered()) ImGui::SetTooltip("Mod name (used for the mod folder in Mods/)");
-    ImGui::SameLine();
-    ImGui::SetNextItemWidth(S(180));
-    ImGui::InputTextWithHint("##playlist", "Default playlist", app.playlist.data(), app.playlist.size());
-    if (ImGui::IsItemHovered()) ImGui::SetTooltip("Default playlist name in skate. Songs use this unless overridden in the table below.");
-    ImGui::SameLine();
 
     const std::string activePlaylist = app.playlist[0] ? app.playlist.data() : "";
     std::string artBtnLabel = "Cover: ";
@@ -872,10 +844,68 @@ void songs_page(App& app, HWND window) {
         artTooltip = "Automatic cover: using first track's album art (or none). Click to customize.";
     }
 
-    if (ImGui::Button(artBtnLabel.c_str())) {
+    const auto& style = ImGui::GetStyle();
+    const float new_btn_w = ImGui::CalcTextSize("New Mod").x + style.FramePadding.x * 2.0f;
+    const float open_btn_w = ImGui::CalcTextSize("Open Mod...").x + style.FramePadding.x * 2.0f;
+    const float name_input_w = S(170.0f);
+    const float playlist_input_w = S(160.0f);
+    const float cover_btn_w = ImGui::CalcTextSize(artBtnLabel.c_str()).x + style.FramePadding.x * 2.0f;
+    const float bitrate_w = S(80.0f);
+    const float norm_w = ImGui::GetFrameHeight() + style.ItemInnerSpacing.x + ImGui::CalcTextSize("Normalize").x;
+    const float settings_btn_w = ImGui::CalcTextSize("Settings...").x + style.FramePadding.x * 2.0f;
+    const float group_gap = S(14.0f);
+
+    const float total_header_w = new_btn_w + style.ItemSpacing.x + open_btn_w
+        + group_gap + name_input_w + style.ItemSpacing.x + playlist_input_w + style.ItemSpacing.x + cover_btn_w
+        + group_gap + bitrate_w + style.ItemSpacing.x + norm_w + style.ItemSpacing.x + settings_btn_w;
+
+    const float avail_w = ImGui::GetContentRegionAvail().x;
+    if (avail_w > total_header_w) {
+        ImGui::SetCursorPosX(ImGui::GetCursorPosX() + (avail_w - total_header_w) * 0.5f);
+    }
+
+    ImGui::BeginDisabled(busy);
+    if (ImGui::Button("New Mod", ImVec2(new_btn_w, 0))) {
+        app.rows.clear();
+        app.output.clear();
+        app.name.fill(0);
+        app.playlist.fill(0);
+        app.normalize = true;
+        app.playlist_artwork.clear();
+        app.generated_playlist_artwork.clear();
+        clear_artwork_preview(app);
+        set_status(app, "");
+    }
+    ImGui::SameLine();
+    if (ImGui::Button("Open Mod...", ImVec2(open_btn_w, 0))) {
+        const auto folders = pick(window, true);
+        if (!folders.empty()) open_mod(app, folders[0]);
+    }
+    ImGui::SameLine(0, group_gap);
+    ImGui::SetNextItemWidth(name_input_w);
+    if (ImGui::InputTextWithHint("##name", "Mod name", app.name.data(), app.name.size()) && !app.output.empty() &&
+        app.output.parent_path() == app.settings.game / L"Mods")
+        app.output.clear(); // a renamed new mod goes to its new folder; an opened one stays where it is
+    if (ImGui::IsItemHovered()) ImGui::SetTooltip("Mod name (used for the mod folder in Mods/)");
+
+    ImGui::SameLine();
+    ImGui::SetNextItemWidth(playlist_input_w);
+    ImGui::InputTextWithHint("##playlist", "Default playlist", app.playlist.data(), app.playlist.size());
+    if (ImGui::IsItemHovered()) ImGui::SetTooltip("Default playlist name in skate. Songs use this unless overridden in the table below.");
+
+    ImGui::SameLine();
+    if (ImGui::Button(artBtnLabel.c_str(), ImVec2(cover_btn_w, 0))) {
         ImGui::OpenPopup("PlaylistCoverPopup");
     }
-    if (ImGui::IsItemHovered()) ImGui::SetTooltip("%s", artTooltip.c_str());
+    if (ImGui::IsItemHovered()) {
+        ImGui::BeginTooltip();
+        ImGui::TextUnformatted(artTooltip.c_str());
+        if (app.artwork_preview) {
+            ImGui::Spacing();
+            ImGui::Image(app.artwork_preview, ImVec2(S(120), S(120)));
+        }
+        ImGui::EndTooltip();
+    }
 
     if (ImGui::BeginPopup("PlaylistCoverPopup")) {
         const auto pName = activePlaylist.empty() ? "Playlist" : activePlaylist;
@@ -889,6 +919,10 @@ void songs_page(App& app, HWND window) {
         } else {
             ImGui::TextUnformatted("Active: Automatic (from first track)");
         }
+        if (app.artwork_preview && app.artwork_preview_label == pName) {
+            ImGui::Spacing();
+            ImGui::Image(app.artwork_preview, ImVec2(S(128), S(128)));
+        }
         ImGui::Spacing();
 
         if (ImGui::Button("Choose Image...")) {
@@ -896,6 +930,7 @@ void songs_page(App& app, HWND window) {
             if (!files.empty()) {
                 app.playlist_artwork[pName] = files[0];
                 app.generated_playlist_artwork.erase(pName);
+                request_artwork_preview(app, pName, files[0], false);
             }
             ImGui::CloseCurrentPopup();
         }
@@ -904,12 +939,14 @@ void songs_page(App& app, HWND window) {
         if (ImGui::Button(isGen ? "Using Text Cover" : "Generate Text Cover")) {
             app.generated_playlist_artwork.insert(pName);
             app.playlist_artwork[pName].clear();
+            request_artwork_preview(app, pName, {}, true);
             ImGui::CloseCurrentPopup();
         }
 
         if (ImGui::Button("Use Automatic")) {
             app.playlist_artwork[pName].clear();
             app.generated_playlist_artwork.erase(pName);
+            clear_artwork_preview(app);
             ImGui::CloseCurrentPopup();
         }
 
@@ -922,15 +959,15 @@ void songs_page(App& app, HWND window) {
         ImGui::EndPopup();
     }
 
-    ImGui::SameLine();
-    ImGui::SetNextItemWidth(S(80));
+    ImGui::SameLine(0, group_gap);
+    ImGui::SetNextItemWidth(bitrate_w);
     ImGui::Combo("##bitrate", &app.bitrate, bitrates, 5);
     if (ImGui::IsItemHovered()) ImGui::SetTooltip("Opus audio bitrate (kbps)");
     ImGui::SameLine();
     ImGui::Checkbox("Normalize", &app.normalize);
     if (ImGui::IsItemHovered()) ImGui::SetTooltip("Equalise track loudness using EBU R128 (-15 LUFS)");
     ImGui::SameLine();
-    if (ImGui::Button("Settings...")) app.settings_open = true;
+    if (ImGui::Button("Settings...", ImVec2(settings_btn_w, 0))) app.settings_open = true;
     ImGui::EndDisabled();
 
     if (app.show_artwork_modal) {
@@ -1023,161 +1060,275 @@ void songs_page(App& app, HWND window) {
     }
 
     ImGui::Spacing();
-    ImGui::TextDisabled("Builds into: %s", narrow(output_folder(app).wstring()).c_str());
+    const std::string builds_into = "Builds into: " + narrow(output_folder(app).wstring());
+    const float builds_into_w = ImGui::CalcTextSize(builds_into.c_str()).x;
+    if (avail_w > builds_into_w) {
+        ImGui::SetCursorPosX(ImGui::GetCursorPosX() + (avail_w - builds_into_w) * 0.5f);
+    }
+    ImGui::TextDisabled("%s", builds_into.c_str());
     ImGui::Spacing();
 
     // The songs.
-    std::vector<std::vector<std::string>> problems(app.rows.size());
-    std::size_t blocked = 0;
-    for (std::size_t i = 0; i < app.rows.size(); ++i) {
-        problems[i] = row_problems(app, i);
-        if (!problems[i].empty()) ++blocked;
-    }
-    const float footer = ImGui::GetFrameHeightWithSpacing() * 3.5f + S(8.0f);
-    std::optional<std::size_t> remove, up, down;
-    if (ImGui::BeginTable("songs", 7,
-                          ImGuiTableFlags_RowBg | ImGuiTableFlags_BordersOuter | ImGuiTableFlags_BordersInnerH |
-                              ImGuiTableFlags_ScrollY | ImGuiTableFlags_Resizable,
-                          ImVec2(0, ImGui::GetContentRegionAvail().y - footer))) {
-        ImGui::TableSetupScrollFreeze(0, 1);
-        ImGui::TableSetupColumn("#", ImGuiTableColumnFlags_WidthFixed, S(32));
-        ImGui::TableSetupColumn("Artist", ImGuiTableColumnFlags_WidthStretch, 1.1f);
-        ImGui::TableSetupColumn("Title", ImGuiTableColumnFlags_WidthStretch, 1.3f);
-        ImGui::TableSetupColumn("Playlist (?)", ImGuiTableColumnFlags_WidthStretch, 0.9f);
-        ImGui::TableSetupColumn("Length", ImGuiTableColumnFlags_WidthFixed, S(64));
-        ImGui::TableSetupColumn("Problems", ImGuiTableColumnFlags_WidthStretch, 1.0f);
-        ImGui::TableSetupColumn("Actions", ImGuiTableColumnFlags_WidthFixed, S(160));
+    if (app.rows.empty()) {
+        const ImVec2 avail = ImGui::GetContentRegionAvail();
+        const float card_w = std::min(avail.x, S(660.0f));
+        const float card_h = std::min(avail.y - S(30.0f), S(340.0f));
+        const float offset_x = (avail.x - card_w) * 0.5f;
+        const float offset_y = std::max(0.0f, (avail.y - card_h) * 0.32f);
+        ImGui::SetCursorPosX(ImGui::GetCursorPosX() + offset_x);
+        ImGui::SetCursorPosY(ImGui::GetCursorPosY() + offset_y);
 
-        const int columns_count = ImGui::TableGetColumnCount();
-        ImGui::TableNextRow(ImGuiTableRowFlags_Headers);
-        for (int column_n = 0; column_n < columns_count; column_n++) {
-            if (!ImGui::TableSetColumnIndex(column_n)) continue;
-            const char* name = ImGui::TableGetColumnName(column_n);
-            ImGui::PushID(column_n);
-            ImGui::TableHeader(name);
-            if (column_n == 3 && ImGui::IsItemHovered()) {
-                ImGui::SetTooltip("Playlist for this song.\nLeave blank to use the default playlist, or type a custom name to group songs into separate playlists.");
-            }
-            ImGui::PopID();
-        }
+        ImGui::PushStyleColor(ImGuiCol_ChildBg, ImVec4(0.13f, 0.15f, 0.19f, 0.85f));
+        ImGui::PushStyleColor(ImGuiCol_Border, ImVec4(0.24f, 0.28f, 0.36f, 0.80f));
+        ImGui::PushStyleVar(ImGuiStyleVar_ChildRounding, S(12.0f));
+        ImGui::PushStyleVar(ImGuiStyleVar_ChildBorderSize, 1.5f);
+        ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(S(28.0f), S(24.0f)));
 
-        for (std::size_t i = 0; i < app.rows.size(); ++i) {
-            auto& row = app.rows[i];
-            ImGui::PushID(static_cast<int>(i));
-            ImGui::TableNextRow();
-            ImGui::TableNextColumn();
-            ImGui::Text("%zu", i + 1);
-            if (ImGui::IsItemHovered()) ImGui::SetTooltip("%s", narrow(row.file.wstring()).c_str());
-            ImGui::BeginDisabled(busy);
-            ImGui::TableNextColumn();
-            ImGui::SetNextItemWidth(-1);
-            ImGui::InputText("##artist", row.artist.data(), row.artist.size());
-            ImGui::TableNextColumn();
-            ImGui::SetNextItemWidth(-1);
-            ImGui::InputText("##title", row.title.data(), row.title.size());
-            ImGui::TableNextColumn();
-            ImGui::SetNextItemWidth(-1);
-            ImGui::InputTextWithHint("##playlist", app.playlist[0] ? app.playlist.data() : "Default", row.playlist.data(), row.playlist.size());
-            if (ImGui::IsItemHovered()) {
-                ImGui::SetTooltip("Playlist for this track.\nLeave blank to inherit \"%s\", or type a custom playlist name.", app.playlist[0] ? app.playlist.data() : "Default");
+        if (ImGui::BeginChild("empty_state_card", ImVec2(card_w, card_h), true,
+                              ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoScrollWithMouse)) {
+            auto center_text = [](const char* text, const ImVec4* color = nullptr) {
+                const float text_w = ImGui::CalcTextSize(text).x;
+                const float card_avail = ImGui::GetContentRegionAvail().x;
+                if (card_avail > text_w) ImGui::SetCursorPosX(ImGui::GetCursorPosX() + (card_avail - text_w) * 0.5f);
+                if (color) ImGui::TextColored(*color, "%s", text);
+                else ImGui::TextUnformatted(text);
+            };
+            auto center_text_disabled = [](const char* text) {
+                const float text_w = ImGui::CalcTextSize(text).x;
+                const float card_avail = ImGui::GetContentRegionAvail().x;
+                if (card_avail > text_w) ImGui::SetCursorPosX(ImGui::GetCursorPosX() + (card_avail - text_w) * 0.5f);
+                ImGui::TextDisabled("%s", text);
+            };
+
+            ImGui::Dummy(ImVec2(0, S(12.0f)));
+            const ImVec4 title_col(0.95f, 0.96f, 0.98f, 1.0f);
+            center_text("Drop Audio Files or Folders Here", &title_col);
+            ImGui::Spacing();
+            center_text_disabled("Drag and drop music directly from File Explorer, or browse below");
+            center_text_disabled("Supports MP3, FLAC, WAV, OGG, Opus, AAC, M4A, AIFF, and more");
+
+            ImGui::Dummy(ImVec2(0, S(18.0f)));
+
+            const float btn_w1 = S(160.0f);
+            const float btn_w2 = S(140.0f);
+            const float btn_spacing = S(12.0f);
+            const float total_btn_w = btn_w1 + btn_spacing + btn_w2;
+            const float card_avail = ImGui::GetContentRegionAvail().x;
+            if (card_avail > total_btn_w) {
+                ImGui::SetCursorPosX(ImGui::GetCursorPosX() + (card_avail - total_btn_w) * 0.5f);
             }
-            ImGui::EndDisabled();
-            ImGui::TableNextColumn();
-            if (row.scanned) ImGui::Text("%d:%02d", static_cast<int>(row.seconds) / 60, static_cast<int>(row.seconds) % 60);
-            else ImGui::TextDisabled("...");
-            ImGui::TableNextColumn();
-            if (!problems[i].empty()) {
-                std::string text;
-                for (const auto& p : problems[i]) text += (text.empty() ? "" : "; ") + p;
-                ImGui::TextColored(ImVec4(1, 0.55f, 0.35f, 1), "%s", text.c_str());
-            }
-            ImGui::TableNextColumn();
+
             ImGui::BeginDisabled(busy);
-            if (ImGui::ArrowButton("up", ImGuiDir_Up) && i > 0) up = i;
-            if (ImGui::IsItemHovered()) ImGui::SetTooltip("Move song up");
-            ImGui::SameLine();
-            if (ImGui::ArrowButton("down", ImGuiDir_Down) && i + 1 < app.rows.size()) down = i;
-            if (ImGui::IsItemHovered()) ImGui::SetTooltip("Move song down");
-            ImGui::SameLine();
-            ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.48f, 0.16f, 0.16f, 0.85f));
-            ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(0.68f, 0.22f, 0.22f, 1.00f));
-            ImGui::PushStyleColor(ImGuiCol_ButtonActive, ImVec4(0.78f, 0.15f, 0.15f, 1.00f));
-            if (ImGui::Button("Remove")) remove = i;
+            ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.18f, 0.44f, 0.76f, 0.90f));
+            ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(0.24f, 0.52f, 0.88f, 1.00f));
+            ImGui::PushStyleColor(ImGuiCol_ButtonActive, ImVec4(0.14f, 0.36f, 0.65f, 1.00f));
+            if (ImGui::Button("Browse Songs...", ImVec2(btn_w1, S(34.0f)))) {
+                add_files(app, pick(window, false));
+            }
+            ImGui::SameLine(0, btn_spacing);
+            if (ImGui::Button("Add Folder...", ImVec2(btn_w2, S(34.0f)))) {
+                add_files(app, pick(window, true));
+            }
             ImGui::PopStyleColor(3);
-            if (ImGui::IsItemHovered()) ImGui::SetTooltip("Remove this song");
             ImGui::EndDisabled();
-            ImGui::PopID();
+
+            ImGui::Dummy(ImVec2(0, S(18.0f)));
+            center_text_disabled("Metadata and embedded album covers are detected automatically.");
+            center_text_disabled("You can customize playlists, order, and artwork once tracks are added.");
         }
-        ImGui::EndTable();
-    }
-    if (up) std::swap(app.rows[*up], app.rows[*up - 1]);
-    if (down) std::swap(app.rows[*down], app.rows[*down + 1]);
-    if (remove) app.rows.erase(app.rows.begin() + static_cast<std::ptrdiff_t>(*remove));
+        ImGui::EndChild();
+        ImGui::PopStyleVar(3);
+        ImGui::PopStyleColor(2);
 
-    ImGui::Spacing();
-    // Footer: add songs, progress or status, build.
-    ImGui::BeginDisabled(busy);
-    if (ImGui::Button("Add songs...", ImVec2(S(120), S(26)))) add_files(app, pick(window, false));
-    ImGui::EndDisabled();
-    ImGui::SameLine();
-    if (app.rows.empty()) ImGui::TextDisabled("Drop audio files or folders onto this window.");
-    else ImGui::TextDisabled("%zu song(s) loaded", app.rows.size());
-
-    std::string block;
-    if (app.rows.empty()) block = "Add some songs.";
-    else if (!music::usable_name(app.name.data())) block = "Give the mod a name.";
-    else if (!music::usable_name(app.playlist.data())) block = "Give the playlist a name.";
-    else if (blocked) block = std::to_string(blocked) + " song(s) need fixing.";
-    else if (std::any_of(app.rows.begin(), app.rows.end(), [](const Row& r) { return !r.scanned; })) block = "Reading the songs...";
-    if (busy) {
-        std::lock_guard lock(app.mutex);
-        ImGui::ProgressBar(app.progress, ImVec2(S(-120), S(26)), (app.job + ": " + app.progress_text).c_str());
-        ImGui::SameLine();
-        if (ImGui::Button("Cancel", ImVec2(-1, S(26)))) app.cancel = true;
+        if (!app.status.empty()) {
+            ImGui::Spacing();
+            const float status_w = ImGui::CalcTextSize(app.status.c_str()).x;
+            if (avail.x > status_w) ImGui::SetCursorPosX(ImGui::GetCursorPosX() + (avail.x - status_w) * 0.5f);
+            ImGui::TextColored(app.status_error ? ImVec4(1.0f, 0.45f, 0.40f, 1.0f) : ImVec4(0.40f, 0.85f, 0.50f, 1.0f),
+                               "%s", app.status.c_str());
+        }
     } else {
-        if (!app.status.empty())
-            ImGui::TextColored(app.status_error ? ImVec4(1.0f, 0.45f, 0.40f, 1.0f) : ImVec4(0.40f, 0.85f, 0.50f, 1.0f), "%s", app.status.c_str());
-        else if (!block.empty()) ImGui::TextDisabled("%s", block.c_str());
-        else if (game_running()) ImGui::TextColored(ImVec4(1.0f, 0.80f, 0.35f, 1.0f), "skate. is running: the mod takes effect the next time it starts.");
-        else ImGui::TextUnformatted("");
-
-        const float button_width = block.empty() ? (ImGui::GetContentRegionAvail().x - S(12)) * 0.68f : ImGui::GetContentRegionAvail().x;
-        ImGui::BeginDisabled(!block.empty());
-        ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.16f, 0.45f, 0.78f, 1.00f));
-        ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(0.22f, 0.54f, 0.90f, 1.00f));
-        ImGui::PushStyleColor(ImGuiCol_ButtonActive, ImVec4(0.13f, 0.38f, 0.68f, 1.00f));
-        if (ImGui::Button(("Build into Mods\\" + narrow(output_folder(app).filename().wstring())).c_str(), ImVec2(button_width, S(30)))) {
-            set_status(app, "");
-            std::set<std::string> names;
-            if (app.playlist[0]) names.insert(app.playlist.data());
-            for (const auto& row : app.rows) if (row.playlist[0]) names.insert(row.playlist.data());
-            bool any_automatic = false;
-            for (const auto& name : names) {
-                bool hasImage = app.playlist_artwork.contains(name) && !app.playlist_artwork[name].empty();
-                bool hasGen = app.generated_playlist_artwork.contains(name);
-                if (!hasImage && !hasGen) {
-                    any_automatic = true;
-                    break;
-                }
-            }
-            if (any_automatic) {
-                app.show_playlist_artwork_prompt = true;
-            } else {
-                build(app);
-            }
+        std::vector<std::vector<std::string>> problems(app.rows.size());
+        std::size_t blocked = 0;
+        for (std::size_t i = 0; i < app.rows.size(); ++i) {
+            problems[i] = row_problems(app, i);
+            if (!problems[i].empty()) ++blocked;
         }
-        ImGui::PopStyleColor(3);
+        const float footer = ImGui::GetFrameHeightWithSpacing() * 3.5f + S(16.0f);
+        std::optional<std::size_t> remove, up, down;
+        if (ImGui::BeginTable("songs", 7,
+                              ImGuiTableFlags_RowBg | ImGuiTableFlags_BordersOuter | ImGuiTableFlags_BordersInnerH |
+                                  ImGuiTableFlags_ScrollY | ImGuiTableFlags_Resizable,
+                              ImVec2(0, ImGui::GetContentRegionAvail().y - footer))) {
+            ImGui::TableSetupScrollFreeze(0, 1);
+            ImGui::TableSetupColumn("#", ImGuiTableColumnFlags_WidthFixed, S(32));
+            ImGui::TableSetupColumn("Artist", ImGuiTableColumnFlags_WidthStretch, 1.1f);
+            ImGui::TableSetupColumn("Title", ImGuiTableColumnFlags_WidthStretch, 1.3f);
+            ImGui::TableSetupColumn("Playlist (?)", ImGuiTableColumnFlags_WidthStretch, 0.9f);
+            ImGui::TableSetupColumn("Length", ImGuiTableColumnFlags_WidthFixed, S(64));
+            ImGui::TableSetupColumn("Problems", ImGuiTableColumnFlags_WidthStretch, 1.0f);
+            ImGui::TableSetupColumn("Actions", ImGuiTableColumnFlags_WidthFixed, S(160));
 
-        if (block.empty()) {
-            ImGui::SameLine();
-            if (ImGui::Button("Export Thunderstore...", ImVec2(-1, S(30)))) {
-                app.show_export_ts = true;
-                if (!app.ts_description[0]) {
-                    copy_text(app.ts_description, "Adds " + std::to_string(app.rows.size()) + " song(s) to skate.");
+            const int columns_count = ImGui::TableGetColumnCount();
+            ImGui::TableNextRow(ImGuiTableRowFlags_Headers);
+            for (int column_n = 0; column_n < columns_count; column_n++) {
+                if (!ImGui::TableSetColumnIndex(column_n)) continue;
+                const char* name = ImGui::TableGetColumnName(column_n);
+                ImGui::PushID(column_n);
+                ImGui::TableHeader(name);
+                if (column_n == 3 && ImGui::IsItemHovered()) {
+                    ImGui::SetTooltip("Playlist for this song.\nLeave blank to use the default playlist, or type a custom name to group songs into separate playlists.");
                 }
+                ImGui::PopID();
             }
+
+            for (std::size_t i = 0; i < app.rows.size(); ++i) {
+                auto& row = app.rows[i];
+                ImGui::PushID(static_cast<int>(i));
+                ImGui::TableNextRow();
+                ImGui::TableNextColumn();
+                ImGui::Text("%zu", i + 1);
+                if (ImGui::IsItemHovered()) ImGui::SetTooltip("%s", narrow(row.file.wstring()).c_str());
+                ImGui::BeginDisabled(busy);
+                ImGui::TableNextColumn();
+                ImGui::SetNextItemWidth(-1);
+                ImGui::InputText("##artist", row.artist.data(), row.artist.size());
+                ImGui::TableNextColumn();
+                ImGui::SetNextItemWidth(-1);
+                ImGui::InputText("##title", row.title.data(), row.title.size());
+                ImGui::TableNextColumn();
+                ImGui::SetNextItemWidth(-1);
+                ImGui::InputTextWithHint("##playlist", app.playlist[0] ? app.playlist.data() : "Default", row.playlist.data(), row.playlist.size());
+                if (ImGui::IsItemHovered()) {
+                    ImGui::SetTooltip("Playlist for this track.\nLeave blank to inherit \"%s\", or type a custom playlist name.", app.playlist[0] ? app.playlist.data() : "Default");
+                }
+                ImGui::EndDisabled();
+                ImGui::TableNextColumn();
+                if (row.scanned) ImGui::Text("%d:%02d", static_cast<int>(row.seconds) / 60, static_cast<int>(row.seconds) % 60);
+                else ImGui::TextDisabled("...");
+                ImGui::TableNextColumn();
+                if (!problems[i].empty()) {
+                    std::string text;
+                    for (const auto& p : problems[i]) text += (text.empty() ? "" : "; ") + p;
+                    ImGui::TextColored(ImVec4(1, 0.55f, 0.35f, 1), "%s", text.c_str());
+                }
+                ImGui::TableNextColumn();
+                ImGui::BeginDisabled(busy);
+                if (ImGui::ArrowButton("up", ImGuiDir_Up) && i > 0) up = i;
+                if (ImGui::IsItemHovered()) ImGui::SetTooltip("Move song up");
+                ImGui::SameLine();
+                if (ImGui::ArrowButton("down", ImGuiDir_Down) && i + 1 < app.rows.size()) down = i;
+                if (ImGui::IsItemHovered()) ImGui::SetTooltip("Move song down");
+                ImGui::SameLine();
+                ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.48f, 0.16f, 0.16f, 0.85f));
+                ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(0.68f, 0.22f, 0.22f, 1.00f));
+                ImGui::PushStyleColor(ImGuiCol_ButtonActive, ImVec4(0.78f, 0.15f, 0.15f, 1.00f));
+                if (ImGui::Button("Remove")) remove = i;
+                ImGui::PopStyleColor(3);
+                if (ImGui::IsItemHovered()) ImGui::SetTooltip("Remove this song");
+                ImGui::EndDisabled();
+                ImGui::PopID();
+            }
+            ImGui::EndTable();
         }
+        if (up) std::swap(app.rows[*up], app.rows[*up - 1]);
+        if (down) std::swap(app.rows[*down], app.rows[*down + 1]);
+        if (remove) app.rows.erase(app.rows.begin() + static_cast<std::ptrdiff_t>(*remove));
+
+        ImGui::Spacing();
+        // Footer: add songs/folder, summary of count and duration, build / export
+        ImGui::BeginDisabled(busy);
+        if (ImGui::Button("Add songs...", ImVec2(S(105), S(26)))) add_files(app, pick(window, false));
+        ImGui::SameLine();
+        if (ImGui::Button("Add folder...", ImVec2(S(105), S(26)))) add_files(app, pick(window, true));
         ImGui::EndDisabled();
+
+        ImGui::SameLine();
+        double total_seconds = 0.0;
+        bool all_scanned = true;
+        for (const auto& r : app.rows) {
+            if (r.scanned) total_seconds += r.seconds;
+            else all_scanned = false;
+        }
+        std::string summary = std::to_string(app.rows.size()) + " song" + (app.rows.size() == 1 ? "" : "s");
+        if (!all_scanned) {
+            summary += " (scanning tags...)";
+        } else {
+            const int total_sec = static_cast<int>(total_seconds);
+            const int hours = total_sec / 3600;
+            const int mins = (total_sec % 3600) / 60;
+            const int secs = total_sec % 60;
+            char dur_buf[64];
+            if (hours > 0) {
+                std::snprintf(dur_buf, sizeof(dur_buf), " (%d:%02d:%02d)", hours, mins, secs);
+            } else {
+                std::snprintf(dur_buf, sizeof(dur_buf), " (%d:%02d)", mins, secs);
+            }
+            summary += dur_buf;
+        }
+        const float summary_w = ImGui::CalcTextSize(summary.c_str()).x;
+        const float rem_w = ImGui::GetContentRegionAvail().x;
+        if (rem_w > summary_w) {
+            ImGui::SetCursorPosX(ImGui::GetCursorPosX() + rem_w - summary_w);
+        }
+        ImGui::TextDisabled("%s", summary.c_str());
+
+        std::string block;
+        if (!music::usable_name(app.name.data())) block = "Give the mod a name.";
+        else if (!music::usable_name(app.playlist.data())) block = "Give the playlist a name.";
+        else if (blocked) block = std::to_string(blocked) + " song(s) need fixing.";
+        else if (std::any_of(app.rows.begin(), app.rows.end(), [](const Row& r) { return !r.scanned; })) block = "Reading the songs...";
+
+        if (busy) {
+            std::lock_guard lock(app.mutex);
+            ImGui::ProgressBar(app.progress, ImVec2(S(-120), S(28)), (app.job + ": " + app.progress_text).c_str());
+            ImGui::SameLine();
+            if (ImGui::Button("Cancel", ImVec2(-1, S(28)))) app.cancel = true;
+        } else {
+            if (!app.status.empty())
+                ImGui::TextColored(app.status_error ? ImVec4(1.0f, 0.45f, 0.40f, 1.0f) : ImVec4(0.40f, 0.85f, 0.50f, 1.0f), "%s", app.status.c_str());
+            else if (!block.empty()) ImGui::TextDisabled("%s", block.c_str());
+            else if (game_running()) ImGui::TextColored(ImVec4(1.0f, 0.80f, 0.35f, 1.0f), "skate. is running: the mod takes effect the next time it starts.");
+            else ImGui::TextUnformatted("");
+
+            const float button_width = block.empty() ? (ImGui::GetContentRegionAvail().x - S(10)) * 0.65f : ImGui::GetContentRegionAvail().x;
+            ImGui::BeginDisabled(!block.empty());
+            ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.16f, 0.45f, 0.78f, 1.00f));
+            ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(0.22f, 0.54f, 0.90f, 1.00f));
+            ImGui::PushStyleColor(ImGuiCol_ButtonActive, ImVec4(0.13f, 0.38f, 0.68f, 1.00f));
+            if (ImGui::Button(("Build into Mods\\" + narrow(output_folder(app).filename().wstring())).c_str(), ImVec2(button_width, S(32)))) {
+                set_status(app, "");
+                std::set<std::string> names;
+                if (app.playlist[0]) names.insert(app.playlist.data());
+                for (const auto& row : app.rows) if (row.playlist[0]) names.insert(row.playlist.data());
+                bool any_automatic = false;
+                for (const auto& name : names) {
+                    bool hasImage = app.playlist_artwork.contains(name) && !app.playlist_artwork[name].empty();
+                    bool hasGen = app.generated_playlist_artwork.contains(name);
+                    if (!hasImage && !hasGen) {
+                        any_automatic = true;
+                        break;
+                    }
+                }
+                if (any_automatic) {
+                    app.show_playlist_artwork_prompt = true;
+                } else {
+                    build(app);
+                }
+            }
+            ImGui::PopStyleColor(3);
+
+            if (block.empty()) {
+                ImGui::SameLine();
+                if (ImGui::Button("Export Thunderstore...", ImVec2(-1, S(32)))) {
+                    app.show_export_ts = true;
+                    if (!app.ts_description[0]) {
+                        copy_text(app.ts_description, "Adds " + std::to_string(app.rows.size()) + " song(s) to skate.");
+                    }
+                }
+            }
+            ImGui::EndDisabled();
+        }
     }
 
     if (app.show_playlist_artwork_prompt) {
