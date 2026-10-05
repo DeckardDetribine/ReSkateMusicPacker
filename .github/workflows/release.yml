@@ -9,7 +9,7 @@ permissions:
 
 jobs:
   build:
-    runs-on: windows-latest
+    runs-on: windows-2022
     steps:
       - uses: actions/checkout@v4
 
@@ -24,7 +24,9 @@ jobs:
         run: ./scripts/check-ffmpeg.ps1
 
       - name: Install ffmpeg (needed by the artwork tests)
-        run: choco install ffmpeg -y --no-progress
+        run: |
+          choco install ffmpeg -y --no-progress
+          ffmpeg -version
 
       - name: Test
         run: ctest --test-dir build -C Release --output-on-failure
