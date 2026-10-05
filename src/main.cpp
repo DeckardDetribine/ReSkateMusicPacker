@@ -252,6 +252,7 @@ struct App {
 
     bool show_export_ts = false;
     bool show_artwork_modal = false;
+    bool show_playlist_artwork_prompt = false;
     std::array<char, 64> ts_author{"Author"};
     std::array<char, 32> ts_version{"1.0.0"};
     std::array<char, 256> ts_description{};
@@ -1131,7 +1132,23 @@ void songs_page(App& app, HWND window) {
         ImGui::PushStyleColor(ImGuiCol_ButtonActive, ImVec4(0.13f, 0.38f, 0.68f, 1.00f));
         if (ImGui::Button(("Build into Mods\\" + narrow(output_folder(app).filename().wstring())).c_str(), ImVec2(button_width, S(30)))) {
             set_status(app, "");
-            build(app);
+            std::set<std::string> names;
+            if (app.playlist[0]) names.insert(app.playlist.data());
+            for (const auto& row : app.rows) if (row.playlist[0]) names.insert(row.playlist.data());
+            bool any_automatic = false;
+            for (const auto& name : names) {
+                bool hasImage = app.playlist_artwork.contains(name) && !app.playlist_artwork[name].empty();
+                bool hasGen = app.generated_playlist_artwork.contains(name);
+                if (!hasImage && !hasGen) {
+                    any_automatic = true;
+                    break;
+                }
+            }
+            if (any_automatic) {
+                app.show_playlist_artwork_prompt = true;
+            } else {
+                build(app);
+            }
         }
         ImGui::PopStyleColor(3);
 
@@ -1145,6 +1162,92 @@ void songs_page(App& app, HWND window) {
             }
         }
         ImGui::EndDisabled();
+    }
+
+    if (app.show_playlist_artwork_prompt) {
+        ImGui::OpenPopup("Playlist Artwork Setup");
+        app.show_playlist_artwork_prompt = false;
+    }
+    if (ImGui::BeginPopupModal("Playlist Artwork Setup", nullptr, ImGuiWindowFlags_AlwaysAutoResize)) {
+        std::set<std::string> names;
+        if (app.playlist[0]) names.insert(app.playlist.data());
+        for (const auto& row : app.rows) if (row.playlist[0]) names.insert(row.playlist.data());
+        std::vector<std::string> unconfigured;
+        for (const auto& name : names) {
+            bool hasImage = app.playlist_artwork.contains(name) && !app.playlist_artwork[name].empty();
+            bool hasGen = app.generated_playlist_artwork.contains(name);
+            if (!hasImage && !hasGen) unconfigured.push_back(name);
+        }
+
+        ImGui::Spacing();
+        ImGui::Text("Playlist artwork has not been selected.");
+        ImGui::TextDisabled("skate. displays playlist covers in its in-game music menu.");
+        ImGui::Spacing();
+
+        if (unconfigured.size() <= 1) {
+            const auto pName = unconfigured.empty() ? (app.playlist[0] ? std::string(app.playlist.data()) : "Playlist") : unconfigured[0];
+            ImGui::Text("Playlist: %s", pName.c_str());
+            ImGui::Spacing();
+            ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.16f, 0.45f, 0.78f, 1.00f));
+            ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(0.22f, 0.54f, 0.90f, 1.00f));
+            ImGui::PushStyleColor(ImGuiCol_ButtonActive, ImVec4(0.13f, 0.38f, 0.68f, 1.00f));
+            if (ImGui::Button("Generate Text Cover & Build", ImVec2(S(220), S(30)))) {
+                app.generated_playlist_artwork.insert(pName);
+                app.playlist_artwork[pName].clear();
+                build(app);
+                ImGui::CloseCurrentPopup();
+            }
+            ImGui::PopStyleColor(3);
+
+            ImGui::SameLine();
+            if (ImGui::Button("Choose Image... & Build", ImVec2(S(180), S(30)))) {
+                const auto files = pick(window, false, true);
+                if (!files.empty()) {
+                    app.playlist_artwork[pName] = files[0];
+                    app.generated_playlist_artwork.erase(pName);
+                    build(app);
+                    ImGui::CloseCurrentPopup();
+                }
+            }
+
+            ImGui::SameLine();
+            if (ImGui::Button("Keep Automatic & Build", ImVec2(S(180), S(30)))) {
+                build(app);
+                ImGui::CloseCurrentPopup();
+            }
+        } else {
+            ImGui::Text("The following playlists have no artwork set:");
+            for (const auto& pName : unconfigured) {
+                ImGui::BulletText("%s", pName.c_str());
+            }
+            ImGui::Spacing();
+            ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.16f, 0.45f, 0.78f, 1.00f));
+            ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(0.22f, 0.54f, 0.90f, 1.00f));
+            ImGui::PushStyleColor(ImGuiCol_ButtonActive, ImVec4(0.13f, 0.38f, 0.68f, 1.00f));
+            if (ImGui::Button("Generate Text Covers for All & Build", ImVec2(S(260), S(30)))) {
+                for (const auto& pName : unconfigured) {
+                    app.generated_playlist_artwork.insert(pName);
+                    app.playlist_artwork[pName].clear();
+                }
+                build(app);
+                ImGui::CloseCurrentPopup();
+            }
+            ImGui::PopStyleColor(3);
+
+            ImGui::SameLine();
+            if (ImGui::Button("Keep Automatic & Build", ImVec2(S(180), S(30)))) {
+                build(app);
+                ImGui::CloseCurrentPopup();
+            }
+        }
+
+        ImGui::SameLine();
+        if (ImGui::Button("Cancel", ImVec2(S(90), S(30)))) {
+            ImGui::CloseCurrentPopup();
+        }
+
+        ImGui::Spacing();
+        ImGui::EndPopup();
     }
 
     if (app.show_export_ts) {
