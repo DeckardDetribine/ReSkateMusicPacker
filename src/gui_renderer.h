@@ -38,6 +38,12 @@ private:
     // The background photo, tile icons and Thunderstore package icons.
     static constexpr UINT max_textures = 160;
     std::vector<ComPtr<ID3D12Resource>> textures_;   // index + 1 = SRV slot; null when free
+    struct RetiredTexture {
+        UINT64 fence_value{};
+        std::size_t slot_index{};
+        ComPtr<ID3D12Resource> resource;
+    };
+    std::vector<RetiredTexture> retired_textures_;
     ComPtr<ID3D12DescriptorHeap> rtv_heap_, srv_heap_;
     ComPtr<ID3D12CommandQueue> queue_;
     ComPtr<ID3D12GraphicsCommandList> list_;

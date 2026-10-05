@@ -141,6 +141,12 @@ void Renderer::render() {
     auto& frame = frames_[frame_index_ % frame_count];
     wait(frame.fence_value);
     if (waitable_) WaitForSingleObject(waitable_, 1000);
+
+    const auto completed = fence_->GetCompletedValue();
+    std::erase_if(retired_textures_, [completed](const RetiredTexture& r) {
+        return completed >= r.fence_value;
+    });
+
     const auto back = swap_->GetCurrentBackBufferIndex();
     frame.allocator->Reset();
     list_->Reset(frame.allocator.Get(), nullptr);
@@ -169,8 +175,25 @@ void Renderer::render() {
 }
 
 ImTextureID Renderer::upload_texture(const std::vector<unsigned char>& pixels, UINT width, UINT height) {
-    auto free_slot = std::find(textures_.begin(), textures_.end(), nullptr);
+    const auto completed = fence_->GetCompletedValue();
+    std::erase_if(retired_textures_, [completed](const RetiredTexture& r) {
+        return completed >= r.fence_value;
+    });
+
+    auto is_slot_pending = [this](std::size_t idx) {
+        return std::any_of(retired_textures_.begin(), retired_textures_.end(),
+            [idx](const RetiredTexture& r) { return r.slot_index == idx; });
+    };
+
+    auto free_slot = textures_.end();
+    for (auto it = textures_.begin(); it != textures_.end(); ++it) {
+        if (*it == nullptr && !is_slot_pending(static_cast<std::size_t>(it - textures_.begin()))) {
+            free_slot = it;
+            break;
+        }
+    }
     if (free_slot == textures_.end() && textures_.size() >= max_textures) return {};
+
     ComPtr<ID3D12Resource> texture;
     D3D12_HEAP_PROPERTIES default_heap{D3D12_HEAP_TYPE_DEFAULT};
     D3D12_RESOURCE_DESC texture_desc{};
@@ -222,6 +245,7 @@ ImTextureID Renderer::upload_texture(const std::vector<unsigned char>& pixels, U
     queue_->ExecuteCommandLists(1, lists);
     queue_->Signal(fence_.Get(), ++fence_value_);
     wait(fence_value_);
+    frame.fence_value = fence_value_;
 
     const auto increment = device_->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
     auto cpu = srv_heap_->GetCPUDescriptorHandleForHeapStart();
@@ -248,10 +272,10 @@ void Renderer::release_texture(ImTextureID id) {
     if (static_cast<UINT64>(id) <= start || offset % increment) return;
     const auto index = static_cast<std::size_t>(offset / increment) - 1;
     if (index >= textures_.size() || !textures_[index]) return;
-    // Frames in flight may still sample it; this is rare enough to wait for.
-    queue_->Signal(fence_.Get(), ++fence_value_);
-    wait(fence_value_);
-    textures_[index].Reset();
+
+    // Defer releasing the resource and reusing this descriptor slot until all
+    // in-flight and current frames (which may sample this texture) are done on the GPU.
+    retired_textures_.push_back({ fence_value_ + frame_count + 1, index, std::move(textures_[index]) });
 }
 
 void Renderer::shutdown() {
@@ -259,6 +283,8 @@ void Renderer::shutdown() {
         queue_->Signal(fence_.Get(), ++fence_value_);
         wait(fence_value_);
     }
+    retired_textures_.clear();
+    textures_.clear();
     ImGui_ImplDX12_Shutdown();
     if (waitable_) CloseHandle(waitable_);
     if (fence_event_) CloseHandle(fence_event_);

@@ -1001,6 +1001,8 @@ void songs_page(App& app, HWND window) {
             }
             ImGui::Spacing();
 
+            const bool artwork_busy = busy || app.artwork_preview_loading;
+            ImGui::BeginDisabled(artwork_busy);
             if (ImGui::Button("Choose Image...")) {
                 const auto files = pick(window, false, true);
                 if (!files.empty()) {
@@ -1037,6 +1039,7 @@ void songs_page(App& app, HWND window) {
                     ImGui::CloseCurrentPopup();
                 }
             }
+            ImGui::EndDisabled();
 
             ImGui::Separator();
             if (ImGui::Button("Manage Track Artwork...")) {
@@ -1808,9 +1811,11 @@ void songs_page(App& app, HWND window) {
 
         // Right side: controls
         ImGui::BeginGroup();
+        const bool artwork_busy = busy || app.artwork_preview_loading;
         if (unconfigured.size() > 1) {
             std::vector<const char*> pl_ptrs;
             for (const auto& name : unconfigured) pl_ptrs.push_back(name.c_str());
+            ImGui::BeginDisabled(artwork_busy);
             if (ImGui::Combo("Playlist", &selected_idx, pl_ptrs.data(), static_cast<int>(pl_ptrs.size()))) {
                 const auto& curName = unconfigured[selected_idx];
                 std::vector<std::pair<fs::path, fs::path>> tracks;
@@ -1822,6 +1827,7 @@ void songs_page(App& app, HWND window) {
                 bool gen = app.generated_playlist_artwork.contains(curName);
                 request_artwork_preview(app, curName, source, gen, std::move(tracks));
             }
+            ImGui::EndDisabled();
         } else {
             ImGui::Text("Playlist: %s", pName.c_str());
         }
@@ -1836,6 +1842,7 @@ void songs_page(App& app, HWND window) {
         }
         ImGui::Spacing();
 
+        ImGui::BeginDisabled(artwork_busy);
         if (ImGui::Button("Generate Text Cover", ImVec2(S(200), S(28)))) {
             app.generated_playlist_artwork.insert(pName);
             app.playlist_artwork[pName].clear();
@@ -1872,12 +1879,14 @@ void songs_page(App& app, HWND window) {
                 request_artwork_preview(app, pName, {}, true);
             }
         }
+        ImGui::EndDisabled();
         ImGui::EndGroup();
 
         ImGui::Spacing();
         ImGui::Separator();
         ImGui::Spacing();
 
+        ImGui::BeginDisabled(artwork_busy);
         ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.16f, 0.45f, 0.78f, 1.00f));
         ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(0.22f, 0.54f, 0.90f, 1.00f));
         ImGui::PushStyleColor(ImGuiCol_ButtonActive, ImVec4(0.13f, 0.38f, 0.68f, 1.00f));
@@ -1887,6 +1896,7 @@ void songs_page(App& app, HWND window) {
             ImGui::CloseCurrentPopup();
         }
         ImGui::PopStyleColor(3);
+        ImGui::EndDisabled();
 
         ImGui::SameLine();
         if (ImGui::Button("Cancel", ImVec2(S(100), S(30)))) {
