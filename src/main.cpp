@@ -453,6 +453,23 @@ void apply_artwork_preview(App& app) {
     } catch (const std::exception& error) { app.artwork_preview_error = error.what(); }
 }
 
+std::vector<std::pair<fs::path, fs::path>> playlist_tracks(const App& app, const std::string& playlist_name) {
+    std::vector<std::pair<fs::path, fs::path>> tracks;
+    for (const auto& row : app.rows) {
+        const auto pl = row.playlist[0] ? row.playlist.data() : app.playlist.data();
+        if (playlist_name == pl) tracks.emplace_back(row.file, row.artwork);
+    }
+    return tracks;
+}
+
+void request_playlist_preview(App& app, const std::string& playlist_name) {
+    auto it = app.playlist_artwork.find(playlist_name);
+    fs::path source = (it != app.playlist_artwork.end()) ? it->second : fs::path{};
+    const bool gen = app.generated_playlist_artwork.contains(playlist_name);
+    auto tracks = playlist_tracks(app, playlist_name);
+    request_artwork_preview(app, playlist_name, std::move(source), gen, std::move(tracks));
+}
+
 // Downloads and installs the pinned ffmpeg build on the one-job worker. Never runs by itself: the
 // button that calls this shows the source, size and licence first.
 void install_ffmpeg(App& app) {
@@ -973,12 +990,13 @@ void songs_page(App& app, HWND window) {
             static int selected_pl_idx = 0;
             if (selected_pl_idx >= static_cast<int>(unique_playlists.size())) selected_pl_idx = 0;
 
+            bool selection_changed = false;
             if (unique_playlists.size() > 1) {
                 std::vector<const char*> pl_ptrs;
                 for (const auto& n : unique_playlists) pl_ptrs.push_back(n.c_str());
                 ImGui::SetNextItemWidth(S(200));
                 if (ImGui::Combo("Playlist##cover_combo", &selected_pl_idx, pl_ptrs.data(), static_cast<int>(pl_ptrs.size()))) {
-                    clear_artwork_preview(app);
+                    selection_changed = true;
                 }
                 ImGui::Separator();
             }
@@ -995,37 +1013,54 @@ void songs_page(App& app, HWND window) {
             } else {
                 ImGui::TextUnformatted("Active: Automatic (from first track)");
             }
-            if (app.artwork_preview && app.artwork_preview_label == pName) {
-                ImGui::Spacing();
+
+            const bool artwork_busy = busy || app.artwork_preview_loading;
+            if (selection_changed || (app.artwork_preview_label != pName && !artwork_busy)) {
+                request_playlist_preview(app, pName);
+            }
+
+            ImGui::Spacing();
+            if (app.artwork_preview_loading && app.artwork_preview_label == pName) {
+                ImGui::BeginChild("cover_preview_box", ImVec2(S(128), S(128)), true);
+                ImGui::TextDisabled("Loading preview...");
+                ImGui::EndChild();
+            } else if (app.artwork_preview && app.artwork_preview_label == pName) {
                 ImGui::Image(app.artwork_preview, ImVec2(S(128), S(128)));
+            } else {
+                ImGui::BeginChild("cover_preview_box", ImVec2(S(128), S(128)), true);
+                ImGui::Spacing();
+                ImGui::TextDisabled("No cover");
+                if (!app.artwork_preview_error.empty() && app.artwork_preview_label == pName) {
+                    ImGui::Spacing();
+                    ImGui::PushTextWrapPos(ImGui::GetCursorPosX() + S(110));
+                    ImGui::TextColored(ImVec4(1.0f, 0.45f, 0.4f, 1.0f), "%s", app.artwork_preview_error.c_str());
+                    ImGui::PopTextWrapPos();
+                }
+                ImGui::EndChild();
             }
             ImGui::Spacing();
 
-            const bool artwork_busy = busy || app.artwork_preview_loading;
             ImGui::BeginDisabled(artwork_busy);
             if (ImGui::Button("Choose Image...")) {
                 const auto files = pick(window, false, true);
                 if (!files.empty()) {
                     app.playlist_artwork[pName] = files[0];
                     app.generated_playlist_artwork.erase(pName);
-                    request_artwork_preview(app, pName, files[0], false);
+                    request_playlist_preview(app, pName);
                 }
-                ImGui::CloseCurrentPopup();
             }
 
             const bool isGen = app.generated_playlist_artwork.contains(pName);
-            if (ImGui::Button(isGen ? "Using Text Cover" : "Generate Text Cover")) {
+            if (ImGui::Button(isGen ? "Re-generate Text Cover" : "Generate Text Cover")) {
                 app.generated_playlist_artwork.insert(pName);
                 app.playlist_artwork[pName].clear();
-                request_artwork_preview(app, pName, {}, true);
-                ImGui::CloseCurrentPopup();
+                request_playlist_preview(app, pName);
             }
 
             if (ImGui::Button("Use Automatic")) {
                 app.playlist_artwork[pName].clear();
                 app.generated_playlist_artwork.erase(pName);
-                clear_artwork_preview(app);
-                ImGui::CloseCurrentPopup();
+                request_playlist_preview(app, pName);
             }
 
             if (unique_playlists.size() > 1) {
@@ -1035,8 +1070,7 @@ void songs_page(App& app, HWND window) {
                         app.generated_playlist_artwork.insert(n);
                         app.playlist_artwork[n].clear();
                     }
-                    request_artwork_preview(app, pName, {}, true);
-                    ImGui::CloseCurrentPopup();
+                    request_playlist_preview(app, pName);
                 }
             }
             ImGui::EndDisabled();
@@ -1044,6 +1078,10 @@ void songs_page(App& app, HWND window) {
             ImGui::Separator();
             if (ImGui::Button("Manage Track Artwork...")) {
                 app.show_artwork_modal = true;
+                ImGui::CloseCurrentPopup();
+            }
+            ImGui::SameLine();
+            if (ImGui::Button("Close")) {
                 ImGui::CloseCurrentPopup();
             }
 
@@ -1118,19 +1156,14 @@ void songs_page(App& app, HWND window) {
                     if (generated) {
                         app.generated_playlist_artwork.insert(name);
                         app.playlist_artwork[name].clear();
-                        preview(name, {}, true);
-                    } else { app.generated_playlist_artwork.erase(name); clear_artwork_preview(app); }
+                        request_playlist_preview(app, name);
+                    } else {
+                        app.generated_playlist_artwork.erase(name);
+                        request_playlist_preview(app, name);
+                    }
                 }
                 if (ImGui::Button("Preview")) {
-                    auto source = app.playlist_artwork[name];
-                    std::vector<std::pair<fs::path, fs::path>> tracks;
-                    if (source.empty() && !generated)
-                        for (const auto& row : app.rows) {
-                            const auto playlist = row.playlist[0] ? row.playlist.data() : app.playlist.data();
-                            if (name != playlist) continue;
-                            tracks.emplace_back(row.file, row.artwork);
-                        }
-                    request_artwork_preview(app, name, source, source.empty() && generated, std::move(tracks));
+                    request_playlist_preview(app, name);
                 }
                 ImGui::Separator();
                 ImGui::PopID();
@@ -1643,7 +1676,7 @@ void songs_page(App& app, HWND window) {
         }
         std::string summary;
         if (unique_playlists.size() > 1) {
-            summary = std::to_string(unique_playlists.size()) + " playlists • ";
+            summary = std::to_string(unique_playlists.size()) + " playlists | ";
         }
         summary += std::to_string(app.rows.size()) + " song" + (app.rows.size() == 1 ? "" : "s");
         if (!all_scanned) {
@@ -1751,14 +1784,7 @@ void songs_page(App& app, HWND window) {
         if (app.playlist[0]) names.insert(app.playlist.data());
         for (const auto& row : app.rows) if (row.playlist[0]) names.insert(row.playlist.data());
         const auto pName = names.empty() ? "Playlist" : *names.begin();
-        std::vector<std::pair<fs::path, fs::path>> tracks;
-        for (const auto& row : app.rows) {
-            const auto pl = row.playlist[0] ? row.playlist.data() : app.playlist.data();
-            if (pName == pl) tracks.emplace_back(row.file, row.artwork);
-        }
-        auto source = app.playlist_artwork[pName];
-        bool gen = app.generated_playlist_artwork.contains(pName);
-        request_artwork_preview(app, pName, source, gen, std::move(tracks));
+        request_playlist_preview(app, pName);
     }
     if (ImGui::BeginPopupModal("Playlist Artwork Setup", nullptr, ImGuiWindowFlags_AlwaysAutoResize)) {
         std::set<std::string> names;
@@ -1789,7 +1815,7 @@ void songs_page(App& app, HWND window) {
             ImGui::BeginChild("cover_preview_box", ImVec2(S(180), S(180)), true);
             ImGui::TextWrapped("Loading preview...");
             ImGui::EndChild();
-        } else if (app.artwork_preview) {
+        } else if (app.artwork_preview && app.artwork_preview_label == pName) {
             ImGui::Image(app.artwork_preview, ImVec2(S(180), S(180)));
         } else {
             ImGui::BeginChild("cover_preview_box", ImVec2(S(180), S(180)), true);
@@ -1818,14 +1844,7 @@ void songs_page(App& app, HWND window) {
             ImGui::BeginDisabled(artwork_busy);
             if (ImGui::Combo("Playlist", &selected_idx, pl_ptrs.data(), static_cast<int>(pl_ptrs.size()))) {
                 const auto& curName = unconfigured[selected_idx];
-                std::vector<std::pair<fs::path, fs::path>> tracks;
-                for (const auto& row : app.rows) {
-                    const auto pl = row.playlist[0] ? row.playlist.data() : app.playlist.data();
-                    if (curName == pl) tracks.emplace_back(row.file, row.artwork);
-                }
-                auto source = app.playlist_artwork[curName];
-                bool gen = app.generated_playlist_artwork.contains(curName);
-                request_artwork_preview(app, curName, source, gen, std::move(tracks));
+                request_playlist_preview(app, curName);
             }
             ImGui::EndDisabled();
         } else {
@@ -1846,7 +1865,7 @@ void songs_page(App& app, HWND window) {
         if (ImGui::Button("Generate Text Cover", ImVec2(S(200), S(28)))) {
             app.generated_playlist_artwork.insert(pName);
             app.playlist_artwork[pName].clear();
-            request_artwork_preview(app, pName, {}, true);
+            request_playlist_preview(app, pName);
         }
 
         if (ImGui::Button("Choose Image...", ImVec2(S(200), S(28)))) {
@@ -1854,19 +1873,14 @@ void songs_page(App& app, HWND window) {
             if (!files.empty()) {
                 app.playlist_artwork[pName] = files[0];
                 app.generated_playlist_artwork.erase(pName);
-                request_artwork_preview(app, pName, files[0], false);
+                request_playlist_preview(app, pName);
             }
         }
 
         if (ImGui::Button("Use Automatic", ImVec2(S(200), S(28)))) {
             app.playlist_artwork[pName].clear();
             app.generated_playlist_artwork.erase(pName);
-            std::vector<std::pair<fs::path, fs::path>> tracks;
-            for (const auto& row : app.rows) {
-                const auto pl = row.playlist[0] ? row.playlist.data() : app.playlist.data();
-                if (pName == pl) tracks.emplace_back(row.file, row.artwork);
-            }
-            request_artwork_preview(app, pName, {}, false, std::move(tracks));
+            request_playlist_preview(app, pName);
         }
 
         if (unconfigured.size() > 1) {
@@ -1876,7 +1890,7 @@ void songs_page(App& app, HWND window) {
                     app.generated_playlist_artwork.insert(name);
                     app.playlist_artwork[name].clear();
                 }
-                request_artwork_preview(app, pName, {}, true);
+                request_playlist_preview(app, pName);
             }
         }
         ImGui::EndDisabled();
