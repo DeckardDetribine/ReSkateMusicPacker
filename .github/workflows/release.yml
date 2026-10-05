@@ -23,6 +23,12 @@ jobs:
         shell: pwsh
         run: ./scripts/check-ffmpeg.ps1
 
+      - name: Install ffmpeg (needed by the artwork tests)
+        run: choco install ffmpeg -y --no-progress
+
+      - name: Test
+        run: ctest --test-dir build -C Release --output-on-failure
+
       - name: Package
         shell: pwsh
         run: |
