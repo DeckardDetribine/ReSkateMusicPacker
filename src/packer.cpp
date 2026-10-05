@@ -1282,7 +1282,7 @@ std::string thunderstore_name(std::string_view in) {
     return out.empty() ? "Mod" : out;
 }
 
-std::string generate_readme(const std::string& modName, const std::string& description, const fs::path& modFolder) {
+std::string generate_readme(const std::string& modName, const std::string& description, const fs::path& modFolder, bool credit = true) {
     std::string md = "# " + modName + "\n\n";
     if (!description.empty()) md += description + "\n\n";
     else md += "Adds custom music to skate. through ReSkate.\n\n";
@@ -1312,6 +1312,9 @@ std::string generate_readme(const std::string& modName, const std::string& descr
     }
 
     md += "## Installation\n\nInstall via Thunderstore Mod Manager, or drop into your ReSkate launcher.\n";
+    if (credit) {
+        md += "\n---\n*Packaged with [ReSkate Music Packer](https://github.com/DeckardDetribine/ReSkateMusicPacker)*\n";
+    }
     return md;
 }
 } // namespace
@@ -1367,7 +1370,7 @@ fs::path export_thunderstore(const fs::path& modFolder, const ThunderstoreOption
     manifest["dependencies"] = Json::array();
     write_file(staging / L"manifest.json", text(manifest.dump(2) + "\n"));
 
-    const auto readme = generate_readme(name, desc, modFolder);
+    const auto readme = generate_readme(name, desc, modFolder, options.readme_credit);
     write_file(staging / L"README.md", text(readme));
 
     if (!options.icon.empty() && fs::exists(options.icon)) {

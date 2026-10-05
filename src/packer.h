@@ -94,6 +94,7 @@ struct ThunderstoreOptions {
     std::string description;
     std::filesystem::path icon;     // optional custom icon.png; if empty, uses mod's icon.png or generates a default
     std::filesystem::path output;   // output .zip path; if empty, saves as <Author>-<Name>-<Version>.zip beside the mod
+    bool readme_credit = true;      // include "Packaged with ReSkate Music Packer" link in auto-generated README.md
 };
 
 // Packages a built mod folder as a Thunderstore-compatible .zip.

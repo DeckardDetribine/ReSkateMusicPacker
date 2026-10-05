@@ -3,6 +3,7 @@
 // The music packer library end to end: two generated tones in, a mod folder out. Needs ffmpeg
 // on PATH and a game folder (argv[1], default F:\Games\ReSkate-1.0.0); without the game it skips.
 #include "packer.h"
+#include "ffmpeg_fetch.h"
 #include "Engine/Core/Json/json.h"
 #include <Windows.h>
 #include <cstdio>
@@ -160,6 +161,10 @@ int wmain(int argc, wchar_t** argv) {
     const auto zipBytes = slurp(zip);
     check(zipBytes.find("cover-0.png") != std::string::npos, "thunderstore zip contains artwork");
     check(zipBytes.find("reskate-music-project.json") == std::string::npos, "thunderstore zip excludes reskate-music-project.json");
+    const auto extractedReadme = root / L"readme_test.md";
+    music::extract_zip_member(zip, "README.md", extractedReadme);
+    check(slurp(extractedReadme).find("Packaged with [ReSkate Music Packer]") != std::string::npos, "thunderstore zip readme includes packer credit by default");
+    fs::remove(extractedReadme);
     fs::remove(zip);
 
     const auto customOutDir = root / L"custom_export_dir";
@@ -169,6 +174,7 @@ int wmain(int argc, wchar_t** argv) {
     customTsOpts.version = "2.0.0";
     customTsOpts.output = customOutDir;
     customTsOpts.icon = cover;
+    customTsOpts.readme_credit = false;
     const auto customZip = music::export_thunderstore(options.output, customTsOpts);
     check(fs::exists(customZip), "custom directory thunderstore zip created");
     check(customZip.parent_path() == customOutDir, "zip created inside custom directory");
@@ -176,6 +182,10 @@ int wmain(int argc, wchar_t** argv) {
     check(fs::file_size(customZip) > 1000, "custom thunderstore zip has content");
     const auto customZipBytes = slurp(customZip);
     check(customZipBytes.find("icon.png") != std::string::npos, "custom thunderstore zip contains icon.png");
+    const auto customExtractedReadme = root / L"custom_readme_test.md";
+    music::extract_zip_member(customZip, "README.md", customExtractedReadme);
+    check(slurp(customExtractedReadme).find("Packaged with [ReSkate Music Packer]") == std::string::npos, "custom thunderstore zip readme omits credit when disabled");
+    fs::remove(customExtractedReadme);
     fs::remove(customZip);
     fs::remove_all(customOutDir);
 

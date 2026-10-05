@@ -259,6 +259,7 @@ struct App {
     fs::path ts_icon;
     fs::path ts_output_folder;
     bool ts_open_explorer = true;
+    bool ts_readme_credit = true;
 
     std::string active_playlist_filter;
     std::optional<std::string> select_playlist_tab;
@@ -1975,6 +1976,7 @@ void songs_page(App& app, HWND window) {
 
         ImGui::Spacing();
         ImGui::Checkbox("Show in File Explorer when finished", &app.ts_open_explorer);
+        ImGui::Checkbox("Include \"Packaged with ReSkate Music Packer\" link in README", &app.ts_readme_credit);
 
         ImGui::Spacing();
         ImGui::Separator();
@@ -1993,6 +1995,7 @@ void songs_page(App& app, HWND window) {
                     opts.description = app.ts_description.data();
                     opts.icon = app.ts_icon;
                     opts.output = effectiveFolder;
+                    opts.readme_credit = app.ts_readme_credit;
                     const auto zip = music::export_thunderstore(mod, opts);
                     set_status(app, "Exported: " + narrow(zip.wstring()));
                     if (app.ts_open_explorer) {
@@ -2110,6 +2113,7 @@ int run_cli(int argc, wchar_t** argv) {
     fs::path ffmpeg_dir;
     std::map<std::string, fs::path> trackArtwork;
     std::string author = "Author", version = "1.0.0";
+    bool readme_credit = true;
     for (int i = 1; i < argc; ++i) {
         const std::wstring arg = argv[i];
         if (arg == L"--help" || arg == L"-h" || arg == L"/?") {
@@ -2124,6 +2128,7 @@ int run_cli(int argc, wchar_t** argv) {
                         "  --thunderstore             Export a Thunderstore-ready zip package\n"
                         "  --author <name>            Thunderstore package author (default: Author)\n"
                         "  --version <x.y.z>          Thunderstore package version (default: 1.0.0)\n"
+                        "  --no-readme-credit         Omit packer credit link from the README\n"
                         "  --playlist-artwork <name> <image>  Cover for a playlist\n"
                         "  --track-artwork <id> <image>       Cover for Artist - Title\n"
                         "  --generate-playlist-artwork <name> Text cover for a playlist\n"
@@ -2140,6 +2145,7 @@ int run_cli(int argc, wchar_t** argv) {
         else if (arg == L"--thunderstore") thunderstore = true;
         else if (arg == L"--author" && i + 1 < argc) author = narrow(argv[++i]);
         else if (arg == L"--version" && i + 1 < argc) version = narrow(argv[++i]);
+        else if (arg == L"--no-readme-credit") readme_credit = false;
         else if (arg == L"--playlist-artwork" && i + 2 < argc) {
             const auto name = narrow(argv[++i]);
             options.playlist_artwork[name] = argv[++i];
@@ -2227,7 +2233,11 @@ int run_cli(int argc, wchar_t** argv) {
         });
         std::printf("%zu song(s), %zu KB of audio -> %s\n", result.songs, result.audioKb, narrow(result.output.wstring()).c_str());
         if (thunderstore) {
-            const auto zip = music::export_thunderstore(result.output, {.author = author, .version = version});
+            const auto zip = music::export_thunderstore(result.output, {
+                .author = author,
+                .version = version,
+                .readme_credit = readme_credit
+            });
             std::printf("Thunderstore package -> %s\n", narrow(zip.wstring()).c_str());
         }
         return 0;
