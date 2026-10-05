@@ -1084,10 +1084,10 @@ void songs_page(App& app, HWND window) {
     // The songs.
     if (app.rows.empty()) {
         const ImVec2 avail = ImGui::GetContentRegionAvail();
-        const float card_w = std::min(avail.x - S(48.0f), S(740.0f));
-        const float card_h = std::min(avail.y - S(24.0f), S(420.0f));
+        const float card_w = std::min(avail.x - S(48.0f), S(720.0f));
+        const float card_h = std::min(avail.y - S(20.0f), S(310.0f));
         const float offset_x = std::max(0.0f, (avail.x - card_w) * 0.5f);
-        const float offset_y = std::max(0.0f, (avail.y - card_h) * 0.44f);
+        const float offset_y = std::max(0.0f, (avail.y - card_h) * 0.5f);
         ImGui::SetCursorPosX(ImGui::GetCursorPosX() + offset_x);
         ImGui::SetCursorPosY(ImGui::GetCursorPosY() + offset_y);
 
@@ -1095,7 +1095,7 @@ void songs_page(App& app, HWND window) {
         ImGui::PushStyleColor(ImGuiCol_Border, ImVec4(0.25f, 0.31f, 0.42f, 0.75f));
         ImGui::PushStyleVar(ImGuiStyleVar_ChildRounding, S(14.0f));
         ImGui::PushStyleVar(ImGuiStyleVar_ChildBorderSize, 1.5f);
-        ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(S(32.0f), S(24.0f)));
+        ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(S(28.0f), S(20.0f)));
 
         if (ImGui::BeginChild("empty_state_card", ImVec2(card_w, card_h), true,
                               ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoScrollWithMouse)) {
@@ -1115,7 +1115,7 @@ void songs_page(App& app, HWND window) {
 
             // Audio waveform equalizer graphic
             const float icon_w = S(72.0f);
-            const float icon_h = S(48.0f);
+            const float icon_h = S(42.0f);
             const float card_avail = ImGui::GetContentRegionAvail().x;
             if (card_avail > icon_w) {
                 ImGui::SetCursorPosX(ImGui::GetCursorPosX() + (card_avail - icon_w) * 0.5f);
@@ -1124,7 +1124,7 @@ void songs_page(App& app, HWND window) {
             ImGui::Dummy(ImVec2(icon_w, icon_h));
 
             ImDrawList* draw_list = ImGui::GetWindowDrawList();
-            const float heights[] = { 12.0f, 20.0f, 32.0f, 44.0f, 48.0f, 44.0f, 32.0f, 20.0f, 12.0f };
+            const float heights[] = { 10.0f, 18.0f, 28.0f, 38.0f, 42.0f, 38.0f, 28.0f, 18.0f, 10.0f };
             const float bar_w = S(4.5f);
             const float bar_gap = S(3.8f);
             const int bar_count = 9;
@@ -1133,7 +1133,7 @@ void songs_page(App& app, HWND window) {
             const float center_y = p0.y + icon_h * 0.5f;
 
             for (int b = 0; b < bar_count; ++b) {
-                const float bh = heights[b] * (icon_h / 48.0f);
+                const float bh = heights[b] * (icon_h / 42.0f);
                 const float bx0 = start_x + static_cast<float>(b) * (bar_w + bar_gap);
                 const float by0 = center_y - bh * 0.5f;
                 const float bx1 = bx0 + bar_w;
@@ -1148,17 +1148,17 @@ void songs_page(App& app, HWND window) {
                 draw_list->AddRectFilled(ImVec2(bx0, by0), ImVec2(bx1, by1), col, S(2.5f));
             }
 
-            ImGui::Dummy(ImVec2(0, S(10.0f)));
+            ImGui::Dummy(ImVec2(0, S(8.0f)));
             const ImVec4 title_col(0.96f, 0.97f, 1.0f, 1.0f);
             center_text("Drop Audio Files or Folders Here", &title_col);
             ImGui::Spacing();
             center_text_disabled("Drag and drop music directly from File Explorer, or browse below");
             center_text_disabled("Supports MP3, FLAC, WAV, OGG, Opus, AAC, M4A, AIFF, and more");
 
-            ImGui::Dummy(ImVec2(0, S(20.0f)));
+            ImGui::Dummy(ImVec2(0, S(16.0f)));
 
-            const float btn_w1 = S(170.0f);
-            const float btn_w2 = S(150.0f);
+            const float btn_w1 = S(165.0f);
+            const float btn_w2 = S(145.0f);
             const float btn_spacing = S(14.0f);
             const float total_btn_w = btn_w1 + btn_spacing + btn_w2;
             if (card_avail > total_btn_w) {
@@ -1169,7 +1169,7 @@ void songs_page(App& app, HWND window) {
             ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.18f, 0.48f, 0.86f, 0.95f));
             ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(0.24f, 0.56f, 0.96f, 1.00f));
             ImGui::PushStyleColor(ImGuiCol_ButtonActive, ImVec4(0.14f, 0.40f, 0.74f, 1.00f));
-            if (ImGui::Button("Browse Songs...", ImVec2(btn_w1, S(36.0f)))) {
+            if (ImGui::Button("Browse Songs...", ImVec2(btn_w1, S(34.0f)))) {
                 add_files(app, pick(window, false));
             }
             ImGui::PopStyleColor(3);
@@ -1179,13 +1179,13 @@ void songs_page(App& app, HWND window) {
             ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.20f, 0.24f, 0.30f, 0.95f));
             ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(0.27f, 0.32f, 0.40f, 1.00f));
             ImGui::PushStyleColor(ImGuiCol_ButtonActive, ImVec4(0.16f, 0.20f, 0.25f, 1.00f));
-            if (ImGui::Button("Add Folder...", ImVec2(btn_w2, S(36.0f)))) {
+            if (ImGui::Button("Add Folder...", ImVec2(btn_w2, S(34.0f)))) {
                 add_files(app, pick(window, true));
             }
             ImGui::PopStyleColor(3);
             ImGui::EndDisabled();
 
-            ImGui::Dummy(ImVec2(0, S(24.0f)));
+            ImGui::Dummy(ImVec2(0, S(16.0f)));
             center_text_disabled("Metadata and embedded album covers are detected automatically.");
             center_text_disabled("You can customize playlists, track order, and artwork once tracks are added.");
         }
