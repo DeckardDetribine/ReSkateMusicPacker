@@ -19,6 +19,7 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ### Added
 
 - Thunderstore export dialog now allows selecting a custom output folder, previews the target package path, and displays the full export path in the status bar.
+- Inline playlist cover selector button directly beside the playlist name field, with 1-click options to choose an image, generate a text cover, or reset to automatic.
 
 ## [1.0.0] - 2026-10-05
 

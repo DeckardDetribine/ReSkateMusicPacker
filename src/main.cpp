@@ -251,6 +251,7 @@ struct App {
     std::mutex dropped_mutex;
 
     bool show_export_ts = false;
+    bool show_artwork_modal = false;
     std::array<char, 64> ts_author{"Author"};
     std::array<char, 32> ts_version{"1.0.0"};
     std::array<char, 256> ts_description{};
@@ -841,27 +842,101 @@ void songs_page(App& app, HWND window) {
         if (!folders.empty()) open_mod(app, folders[0]);
     }
     ImGui::SameLine(0, S(20));
-    ImGui::SetNextItemWidth(S(200));
+    ImGui::SetNextItemWidth(S(180));
     if (ImGui::InputTextWithHint("##name", "Mod name", app.name.data(), app.name.size()) && !app.output.empty() &&
         app.output.parent_path() == app.settings.game / L"Mods")
         app.output.clear(); // a renamed new mod goes to its new folder; an opened one stays where it is
     if (ImGui::IsItemHovered()) ImGui::SetTooltip("Mod name (used for the mod folder in Mods/)");
     ImGui::SameLine();
-    ImGui::SetNextItemWidth(S(200));
+    ImGui::SetNextItemWidth(S(180));
     ImGui::InputTextWithHint("##playlist", "Playlist name (in-game)", app.playlist.data(), app.playlist.size());
     if (ImGui::IsItemHovered()) ImGui::SetTooltip("Playlist name shown in skate. audio settings");
     ImGui::SameLine();
-    ImGui::SetNextItemWidth(S(85));
+
+    const std::string activePlaylist = app.playlist[0] ? app.playlist.data() : "";
+    std::string artBtnLabel = "Cover: ";
+    std::string artTooltip;
+    if (activePlaylist.empty()) {
+        artBtnLabel += "Auto";
+        artTooltip = "Automatic cover: using first track's album art (or none). Enter playlist name to customize.";
+    } else if (const auto it = app.playlist_artwork.find(activePlaylist); it != app.playlist_artwork.end() && !it->second.empty()) {
+        const auto fname = narrow(it->second.filename().wstring());
+        artBtnLabel += (fname.size() > 10 ? fname.substr(0, 8) + ".." : fname);
+        artTooltip = "Custom cover image: " + narrow(it->second.wstring());
+    } else if (app.generated_playlist_artwork.contains(activePlaylist)) {
+        artBtnLabel += "Text";
+        artTooltip = "Generated text cover styled with playlist name";
+    } else {
+        artBtnLabel += "Auto";
+        artTooltip = "Automatic cover: using first track's album art (or none). Click to customize.";
+    }
+
+    if (ImGui::Button(artBtnLabel.c_str())) {
+        ImGui::OpenPopup("PlaylistCoverPopup");
+    }
+    if (ImGui::IsItemHovered()) ImGui::SetTooltip("%s", artTooltip.c_str());
+
+    if (ImGui::BeginPopup("PlaylistCoverPopup")) {
+        const auto pName = activePlaylist.empty() ? "Playlist" : activePlaylist;
+        ImGui::TextUnformatted(activePlaylist.empty() ? "Playlist: (default)" : ("Playlist: " + activePlaylist).c_str());
+        ImGui::Separator();
+
+        if (!activePlaylist.empty() && app.playlist_artwork.contains(activePlaylist) && !app.playlist_artwork[activePlaylist].empty()) {
+            ImGui::Text("Active: %s", narrow(app.playlist_artwork[activePlaylist].filename().wstring()).c_str());
+        } else if (!activePlaylist.empty() && app.generated_playlist_artwork.contains(activePlaylist)) {
+            ImGui::TextUnformatted("Active: Generated text cover");
+        } else {
+            ImGui::TextUnformatted("Active: Automatic (from first track)");
+        }
+        ImGui::Spacing();
+
+        if (ImGui::Button("Choose Image...")) {
+            const auto files = pick(window, false, true);
+            if (!files.empty()) {
+                app.playlist_artwork[pName] = files[0];
+                app.generated_playlist_artwork.erase(pName);
+            }
+            ImGui::CloseCurrentPopup();
+        }
+
+        const bool isGen = app.generated_playlist_artwork.contains(pName);
+        if (ImGui::Button(isGen ? "Using Text Cover" : "Generate Text Cover")) {
+            app.generated_playlist_artwork.insert(pName);
+            app.playlist_artwork[pName].clear();
+            ImGui::CloseCurrentPopup();
+        }
+
+        if (ImGui::Button("Use Automatic")) {
+            app.playlist_artwork[pName].clear();
+            app.generated_playlist_artwork.erase(pName);
+            ImGui::CloseCurrentPopup();
+        }
+
+        ImGui::Separator();
+        if (ImGui::Button("Manage Track Artwork...")) {
+            app.show_artwork_modal = true;
+            ImGui::CloseCurrentPopup();
+        }
+
+        ImGui::EndPopup();
+    }
+
+    ImGui::SameLine();
+    ImGui::SetNextItemWidth(S(80));
     ImGui::Combo("##bitrate", &app.bitrate, bitrates, 5);
     if (ImGui::IsItemHovered()) ImGui::SetTooltip("Opus audio bitrate (kbps)");
     ImGui::SameLine();
     ImGui::Checkbox("Normalize", &app.normalize);
     if (ImGui::IsItemHovered()) ImGui::SetTooltip("Equalise track loudness using EBU R128 (-15 LUFS)");
     ImGui::SameLine();
-    if (ImGui::Button("Artwork...")) ImGui::OpenPopup("Track and playlist artwork");
-    ImGui::SameLine();
     if (ImGui::Button("Settings...")) app.settings_open = true;
     ImGui::EndDisabled();
+
+    if (app.show_artwork_modal) {
+        ImGui::OpenPopup("Track and playlist artwork");
+        app.show_artwork_modal = false;
+    }
+
 
     if (ImGui::BeginPopupModal("Track and playlist artwork", nullptr, ImGuiWindowFlags_AlwaysAutoResize)) {
         ImGui::PushTextWrapPos(ImGui::GetCursorPosX() + S(700));
