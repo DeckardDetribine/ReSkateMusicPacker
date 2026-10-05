@@ -159,6 +159,7 @@ int wmain(int argc, wchar_t** argv) {
     check(fs::file_size(zip) > 1000, "thunderstore zip has content");
     const auto zipBytes = slurp(zip);
     check(zipBytes.find("cover-0.png") != std::string::npos, "thunderstore zip contains artwork");
+    check(zipBytes.find("reskate-music-project.json") == std::string::npos, "thunderstore zip excludes reskate-music-project.json");
     fs::remove(zip);
 
     const auto customOutDir = root / L"custom_export_dir";

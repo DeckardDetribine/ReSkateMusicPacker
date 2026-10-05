@@ -14,6 +14,7 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - Thunderstore icon picker now filters for images (`.png`, `.jpg`, `.jpeg`, `.webp`, `.bmp`) by default instead of audio files.
 - Thunderstore custom icons are now scaled and converted to standard 256x256 PNGs.
 - Fixed File Explorer auto-reveal failing silently when exporting a Thunderstore package.
+- Exclude local editor project files (`reskate-music-project.json`) from Thunderstore export packages.
 
 ### Added
 

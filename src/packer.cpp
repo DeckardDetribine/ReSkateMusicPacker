@@ -1343,8 +1343,10 @@ fs::path export_thunderstore(const fs::path& modFolder, const ThunderstoreOption
     fs::create_directories(staging, ec);
 
     for (const auto& entry : fs::directory_iterator(modFolder)) {
-        const auto leaf = entry.path().filename().wstring();
-        if (leaf == L"manifest.json" || leaf == L"icon.png" || leaf == L"README.md" || leaf == L"readme.md")
+        auto leaf = entry.path().filename().wstring();
+        std::transform(leaf.begin(), leaf.end(), leaf.begin(), ::towlower);
+        if (leaf == L"manifest.json" || leaf == L"icon.png" || leaf == L"readme.md" ||
+            leaf == L"reskate-music-project.json")
             continue;
         fs::copy(entry.path(), staging / entry.path().filename(), fs::copy_options::recursive | fs::copy_options::overwrite_existing, ec);
     }
