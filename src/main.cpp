@@ -161,7 +161,7 @@ std::vector<fs::path> pick(HWND owner, bool folder, bool image = false) {
     return result;
 }
 
-// A dropped folder brings in its audio files, sorted by name (not its subfolders).
+// A dropped or chosen folder brings in its audio files, including subfolders, sorted by name.
 std::vector<fs::path> expand(const std::vector<fs::path>& paths) {
     static const std::set<std::wstring> audio{
         L".mp3", L".flac", L".ogg", L".opus", L".wav", L".m4a", L".aac", L".wma",
@@ -172,14 +172,19 @@ std::vector<fs::path> expand(const std::vector<fs::path>& paths) {
         std::error_code error;
         if (!fs::is_directory(path, error)) { files.push_back(path); continue; }
         std::vector<fs::path> inside;
-        for (const auto& entry : fs::directory_iterator(path, error)) {
+        for (const auto& entry : fs::recursive_directory_iterator(path, fs::directory_options::skip_permission_denied, error)) {
+            if (error) break;
+            std::error_code ec;
+            if (!entry.is_regular_file(ec)) continue;
             auto extension = entry.path().extension().wstring();
             std::transform(extension.begin(), extension.end(), extension.begin(), ::towlower);
-            if (entry.is_regular_file() && audio.contains(extension)) inside.push_back(entry.path());
+            if (audio.contains(extension)) inside.push_back(entry.path());
         }
         std::sort(inside.begin(), inside.end());
         files.insert(files.end(), inside.begin(), inside.end());
     }
+    std::sort(files.begin(), files.end());
+    files.erase(std::unique(files.begin(), files.end()), files.end());
     return files;
 }
 

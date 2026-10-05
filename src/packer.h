@@ -59,6 +59,17 @@ struct Cancelled : std::runtime_error {
 // Whether text is fit for an artist, title or playlist name: 1-255 characters, no control characters.
 bool usable_name(const std::string& text);
 
+// Folds smart quotes and UTF-8/mojibake apostrophes onto their ASCII forms, so a tag cannot
+// smuggle multi-byte sequences into an asset name or the song id.
+std::string sanitize_text(const std::string& text);
+// The asset-path slug of a song: ASCII letters and digits only, since it becomes an asset path.
+// Smart quotes are folded first, and every other run of punctuation collapses to one underscore.
+std::string slug_of(const std::string& artist, const std::string& title);
+// Case-insensitive uniqueness for asset slugs: returns `base`, or base_2, base_3, ... until the
+// lowered result is unused, and records it in `used`. The bundle stores asset names lowercased,
+// so two titles differing only in case must not resolve to the same asset.
+std::string unique_slug(const std::string& base, std::set<std::string>& used);
+
 // Tags and length of each file, without encoding. Never throws for a bad file: that is a problem entry.
 std::vector<SongInfo> scan(std::span<const std::filesystem::path> files);
 

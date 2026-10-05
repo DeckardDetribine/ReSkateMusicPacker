@@ -6,6 +6,7 @@
 #include "ffmpeg_fetch.h"
 #include "Engine/Core/Json/json.h"
 #include <Windows.h>
+#include <cctype>
 #include <cstdio>
 #include <atomic>
 #include <cstdlib>
@@ -36,6 +37,30 @@ void tone(const fs::path& file, int hertz, const char* artist, const char* title
 } // namespace
 
 int wmain(int argc, wchar_t** argv) {
+    { // Slug derivation is pure, so the collision and sanitization rules are checked first.
+        const auto lower = [](std::string text) {
+            for (auto& c : text) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+            return text;
+        };
+        std::set<std::string> used;
+        const auto first = music::slug_of("Diego Money", "Wit Em");
+        const auto second = music::slug_of("DIEGO MONEY", "WIT EM");
+        check(first == "Diego_Money_Wit_Em", "slug_of keeps ASCII words and underscores");
+        check(music::unique_slug(first, used) == "Diego_Money_Wit_Em", "the first slug is used as-is");
+        const auto deduped = music::unique_slug(second, used);
+        check(deduped == "DIEGO_MONEY_WIT_EM_2", "a case-only collision gets a distinct suffix");
+        check(lower(first) + "_mg" == "diego_money_wit_em_mg" &&
+              lower(deduped) + "_mg" == "diego_money_wit_em_2_mg",
+              "case-differing songs get distinct lowercased asset names");
+        check(music::unique_slug("diego_money_wit_em", used) == "diego_money_wit_em_3",
+              "a lowered collision keeps counting up");
+        check(music::sanitize_text("P\xe2\x80\x99Z") == "P'Z", "a UTF-8 right single quote folds to ASCII");
+        check(music::sanitize_text("\xc3\xa2\xe2\x82\xac\xe2\x84\xa2") == "'", "the mojibake apostrophe folds to ASCII");
+        check(music::sanitize_text("\xe2\x80\x9cHi\xe2\x80\x9d") == "\"Hi\"", "curly double quotes fold to ASCII");
+        check(music::slug_of("P\xe2\x80\x99Z", "x") == music::slug_of("P'Z", "x"),
+              "smart and ASCII apostrophes slug the same");
+    }
+
     const fs::path game = argc > 1 ? argv[1] : L"F:/Games/ReSkate-1.0.0";
     if (!fs::exists(game / L"Skate.exe")) { std::printf("SKIP: no game at %ls\n", game.c_str()); return 0; }
 

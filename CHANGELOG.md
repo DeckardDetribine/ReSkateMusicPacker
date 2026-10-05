@@ -7,6 +7,17 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [1.1.2] - 2026-10-05
+
+### Added
+
+- **Recursive folder import**: dropping or choosing a folder now scans its subfolders for audio files, and duplicate paths are removed.
+
+### Fixed
+
+- **Case-only song titles collided in the bundle**: asset slugs are now deduplicated case-insensitively, so titles differing only in letter case (for example `Wit Em` vs `WIT EM`) get distinct assets (`..._wit_em_mg` / `..._wit_em_2_mg`) instead of overwriting each other.
+- **Smart quotes in tags**: curly apostrophes and quotes (`’`, `‘`, `“`, `”`) and their double-encoded `â€™` forms are folded to ASCII before a song's artist/title becomes an asset path or song id.
+
 ## [1.1.1] - 2026-10-05
 
 ### Added

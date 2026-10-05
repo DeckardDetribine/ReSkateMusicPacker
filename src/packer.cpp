@@ -41,6 +41,7 @@
 #include <span>
 #include <stdexcept>
 #include <string>
+#include <string_view>
 #include <vector>
 
 namespace fs = std::filesystem;
@@ -233,19 +234,6 @@ std::string trim(std::string text) {
     while (!text.empty() && std::isspace(static_cast<unsigned char>(text.back()))) text.pop_back();
     const auto start = text.find_first_not_of(" \t");
     return start == std::string::npos ? std::string{} : text.substr(start);
-}
-
-// The asset-path slug of a song: ASCII letters and digits only, since it becomes an asset path.
-std::string slug_of(const std::string& artist, const std::string& title) {
-    std::string slug;
-    for (const auto c : artist + "_" + title) {
-        if (std::isalnum(static_cast<unsigned char>(c)) && static_cast<unsigned char>(c) < 128) slug += c;
-        else if (!slug.empty() && slug.back() != '_') slug += '_';
-    }
-    while (!slug.empty() && slug.back() == '_') slug.pop_back();
-    if (slug.size() > 64) slug.resize(64);
-    if (slug.empty()) slug = "Song";
-    return slug;
 }
 
 // Where scan and pack keep ffprobe's and ffmpeg's output.
@@ -803,12 +791,16 @@ music::PackResult build(const music::PackOptions& options, const fs::path& out, 
         const auto& pName = info.playlist.empty() ? options.playlist : info.playlist;
         if (!usable(pName))
             throw std::runtime_error(narrow(info.file.filename().wstring()) + ": playlist name is empty, too long, or has control characters");
-        Song song{info.file, info.artist, info.title, slug_of(info.artist, info.title), pName};
+        // Fold smart quotes before the name becomes an asset path or a song id, so a
+        // mis-tagged title cannot produce a byte-identical lowercased asset name.
+        const auto artist = music::sanitize_text(info.artist);
+        const auto title = music::sanitize_text(info.title);
+        Song song{info.file, artist, title, music::slug_of(artist, title), pName};
         const auto id = song.artist + " - " + song.title;
         if (!ids.insert(id).second) throw std::runtime_error("Two songs are both \"" + id + "\"");
         order.push_back(id);
-        const auto base = song.slug;
-        for (int n = 2; !slugs.insert(song.slug).second; ++n) song.slug = base + "_" + std::to_string(n);
+        // The bundle stores asset names lowercased, so uniqueness is case-insensitive too.
+        song.slug = music::unique_slug(song.slug, slugs);
         songs.push_back(std::move(song));
     }
     for (std::size_t index = 0; index < songs.size(); ++index) {
@@ -1057,6 +1049,59 @@ music::PackResult build(const music::PackOptions& options, const fs::path& out, 
 namespace music {
 
 bool usable_name(const std::string& text) { return usable(text); }
+
+namespace {
+// Smart quote / apostrophe sequences folded onto ASCII. The trailing rows are the
+// double-encoded ("â€™") forms that mis-tagged files produce for the same characters.
+struct QuoteFold { std::string_view from; char to; };
+constexpr QuoteFold quote_folds[]{
+    {"\xe2\x80\x98", '\''}, {"\xe2\x80\x99", '\''}, {"\xe2\x80\x9a", '\''}, {"\xe2\x80\xb2", '\''},
+    {"\xe2\x80\x9c", '"'},  {"\xe2\x80\x9d", '"'},  {"\xe2\x80\x9e", '"'},
+    {"\xc3\xa2\xe2\x82\xac\xe2\x84\xa2", '\''}, {"\xc3\xa2\xe2\x82\xac\xcb\x9c", '\''},
+    {"\xc3\xa2\xe2\x82\xac\xe2\x80\x9a", '\''}, {"\xc3\xa2\xe2\x82\xac\xe2\x80\xb2", '\''},
+    {"\xc3\xa2\xe2\x82\xac\xc5\x93", '"'}, {"\xc3\xa2\xe2\x82\xac\xc2\x9d", '"'},
+    {"\xc3\xa2\xe2\x82\xac\xe2\x80\x9e", '"'},
+};
+std::string lower_ascii(std::string text) {
+    std::ranges::transform(text, text.begin(), [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+    return text;
+}
+} // namespace
+
+std::string sanitize_text(const std::string& text) {
+    std::string out;
+    out.reserve(text.size());
+    for (std::size_t i = 0; i < text.size();) {
+        bool folded = false;
+        for (const auto& fold : quote_folds)
+            if (text.compare(i, fold.from.size(), fold.from.data(), fold.from.size()) == 0) {
+                out += fold.to;
+                i += fold.from.size();
+                folded = true;
+                break;
+            }
+        if (!folded) out += text[i++];
+    }
+    return out;
+}
+
+std::string slug_of(const std::string& artist, const std::string& title) {
+    std::string slug;
+    for (const auto c : sanitize_text(artist) + "_" + sanitize_text(title)) {
+        if (std::isalnum(static_cast<unsigned char>(c)) && static_cast<unsigned char>(c) < 128) slug += c;
+        else if (!slug.empty() && slug.back() != '_') slug += '_';
+    }
+    while (!slug.empty() && slug.back() == '_') slug.pop_back();
+    if (slug.size() > 64) slug.resize(64);
+    if (slug.empty()) slug = "Song";
+    return slug;
+}
+
+std::string unique_slug(const std::string& base, std::set<std::string>& used) {
+    std::string candidate = base;
+    for (int n = 2; !used.insert(lower_ascii(candidate)).second; ++n) candidate = base + "_" + std::to_string(n);
+    return candidate;
+}
 
 std::vector<std::byte> image_artwork_png(const fs::path& image) {
     const auto temporary = scratch_folder() / L"image-preview.png";
