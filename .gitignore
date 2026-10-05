@@ -1,5 +1,6 @@
 build/
 .vs/
+.kilo/
 *.user
 *.exe.recipe
 *.ilk
