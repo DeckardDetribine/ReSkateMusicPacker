@@ -29,7 +29,7 @@ jobs:
           ffmpeg -version
 
       - name: Test
-        run: ctest --test-dir build -C Release --output-on-failure
+        run: ctest --test-dir build -C Release --output-on-failure --no-tests=error
 
       - name: Package
         shell: pwsh
@@ -50,5 +50,4 @@ jobs:
         with:
           files: |
             ReSkateMusicPacker-${{ github.ref_name }}-win64.zip
-            build/Release/ReSkateMusicPacker.exe
           generate_release_notes: true

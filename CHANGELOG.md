@@ -7,6 +7,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [1.0.0] - 2026-10-05
+
 ### Added
 
 - Cover artwork: extract embedded album art automatically, choose a track or playlist image, or
