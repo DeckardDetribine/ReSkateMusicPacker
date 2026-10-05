@@ -260,6 +260,13 @@ struct App {
     fs::path ts_output_folder;
     bool ts_open_explorer = true;
 
+    std::string active_playlist_filter;
+    std::optional<std::string> select_playlist_tab;
+    std::vector<std::string> custom_playlists;
+    bool show_new_playlist_modal = false;
+    std::array<char, 64> new_playlist_input{};
+    int new_playlist_row_target = -1;
+
     std::map<std::string, ExternalSong> external_songs;
 } *g_app;
 
@@ -477,13 +484,20 @@ void install_ffmpeg(App& app) {
     });
 }
 
-void add_files(App& app, const std::vector<fs::path>& paths) {
+void add_files(App& app, const std::vector<fs::path>& paths, const std::string& target_playlist = "") {
     auto files = expand(paths);
     std::erase_if(files, [&](const fs::path& file) {
         return std::any_of(app.rows.begin(), app.rows.end(), [&](const Row& row) { return row.file == file; });
     });
     if (files.empty() || app.busy) return;
-    for (const auto& file : files) app.rows.push_back(Row{file});
+    const std::string pl = !target_playlist.empty() ? target_playlist : app.active_playlist_filter;
+    for (const auto& file : files) {
+        Row row{file};
+        if (!pl.empty() && pl != (app.playlist[0] ? app.playlist.data() : "Default")) {
+            copy_text(row.playlist, pl);
+        }
+        app.rows.push_back(std::move(row));
+    }
     start(app, "Scanning", [&app, files] {
         for (std::size_t i = 0; i < files.size() && !app.cancel; ++i) {
             const std::vector<fs::path> one{files[i]};
@@ -501,6 +515,9 @@ void open_mod(App& app, const fs::path& folder) {
         const auto project = music::load_project(folder);
         clear_artwork_preview(app);
         app.rows.clear();
+        app.active_playlist_filter.clear();
+        app.custom_playlists.clear();
+        app.select_playlist_tab.reset();
         copy_text(app.name, project.name);
         copy_text(app.playlist, project.playlist);
         app.bitrate = 2;
@@ -826,22 +843,56 @@ void settings_modal(App& app, HWND window) {
 void songs_page(App& app, HWND window) {
     const bool busy = app.busy;
 
-    const std::string activePlaylist = app.playlist[0] ? app.playlist.data() : "";
-    std::string artBtnLabel = "Cover: ";
+    const std::string defaultPlaylistName = app.playlist[0] ? app.playlist.data() : "Default";
+    std::vector<std::string> unique_playlists;
+    std::map<std::string, std::pair<std::size_t, double>> playlist_stats;
+    unique_playlists.push_back(defaultPlaylistName);
+    playlist_stats[defaultPlaylistName] = {0, 0.0};
+
+    for (const auto& cpl : app.custom_playlists) {
+        if (std::find(unique_playlists.begin(), unique_playlists.end(), cpl) == unique_playlists.end()) {
+            unique_playlists.push_back(cpl);
+            playlist_stats[cpl] = {0, 0.0};
+        }
+    }
+
+    for (const auto& r : app.rows) {
+        const std::string pl = r.playlist[0] ? r.playlist.data() : defaultPlaylistName;
+        if (std::find(unique_playlists.begin(), unique_playlists.end(), pl) == unique_playlists.end()) {
+            unique_playlists.push_back(pl);
+        }
+        auto& stats = playlist_stats[pl];
+        stats.first++;
+        if (r.scanned) stats.second += r.seconds;
+    }
+
+    if (!app.active_playlist_filter.empty() &&
+        std::find(unique_playlists.begin(), unique_playlists.end(), app.active_playlist_filter) == unique_playlists.end()) {
+        app.active_playlist_filter.clear();
+    }
+
+    std::string artBtnLabel;
     std::string artTooltip;
-    if (activePlaylist.empty()) {
-        artBtnLabel += "Auto";
-        artTooltip = "Automatic cover: using first track's album art (or none). Enter playlist name to customize.";
-    } else if (const auto it = app.playlist_artwork.find(activePlaylist); it != app.playlist_artwork.end() && !it->second.empty()) {
-        const auto fname = narrow(it->second.filename().wstring());
-        artBtnLabel += (fname.size() > 10 ? fname.substr(0, 8) + ".." : fname);
-        artTooltip = "Custom cover image: " + narrow(it->second.wstring());
-    } else if (app.generated_playlist_artwork.contains(activePlaylist)) {
-        artBtnLabel += "Text";
-        artTooltip = "Generated text cover styled with playlist name";
+    if (unique_playlists.size() > 1) {
+        artBtnLabel = "Covers (" + std::to_string(unique_playlists.size()) + ")";
+        artTooltip = "Configure artwork for each of the " + std::to_string(unique_playlists.size()) + " playlists in this mod";
     } else {
-        artBtnLabel += "Auto";
-        artTooltip = "Automatic cover: using first track's album art (or none). Click to customize.";
+        const std::string activePlaylist = app.playlist[0] ? app.playlist.data() : "";
+        artBtnLabel = "Cover: ";
+        if (activePlaylist.empty()) {
+            artBtnLabel += "Auto";
+            artTooltip = "Automatic cover: using first track's album art (or none). Enter playlist name to customize.";
+        } else if (const auto it = app.playlist_artwork.find(activePlaylist); it != app.playlist_artwork.end() && !it->second.empty()) {
+            const auto fname = narrow(it->second.filename().wstring());
+            artBtnLabel += (fname.size() > 10 ? fname.substr(0, 8) + ".." : fname);
+            artTooltip = "Custom cover image: " + narrow(it->second.wstring());
+        } else if (app.generated_playlist_artwork.contains(activePlaylist)) {
+            artBtnLabel += "Text";
+            artTooltip = "Generated text cover styled with playlist name";
+        } else {
+            artBtnLabel += "Auto";
+            artTooltip = "Automatic cover: using first track's album art (or none). Click to customize.";
+        }
     }
 
     const auto& style = ImGui::GetStyle();
@@ -876,6 +927,9 @@ void songs_page(App& app, HWND window) {
         if (ImGui::Button("New Mod", ImVec2(new_btn_w, 0))) {
             app.rows.clear();
             app.output.clear();
+            app.active_playlist_filter.clear();
+            app.custom_playlists.clear();
+            app.select_playlist_tab.reset();
             app.name.fill(0);
             app.playlist.fill(0);
             app.normalize = true;
@@ -916,13 +970,27 @@ void songs_page(App& app, HWND window) {
         }
 
         if (ImGui::BeginPopup("PlaylistCoverPopup")) {
-            const auto pName = activePlaylist.empty() ? "Playlist" : activePlaylist;
-            ImGui::TextUnformatted(activePlaylist.empty() ? "Playlist: (default)" : ("Playlist: " + activePlaylist).c_str());
+            static int selected_pl_idx = 0;
+            if (selected_pl_idx >= static_cast<int>(unique_playlists.size())) selected_pl_idx = 0;
+
+            if (unique_playlists.size() > 1) {
+                std::vector<const char*> pl_ptrs;
+                for (const auto& n : unique_playlists) pl_ptrs.push_back(n.c_str());
+                ImGui::SetNextItemWidth(S(200));
+                if (ImGui::Combo("Playlist##cover_combo", &selected_pl_idx, pl_ptrs.data(), static_cast<int>(pl_ptrs.size()))) {
+                    clear_artwork_preview(app);
+                }
+                ImGui::Separator();
+            }
+
+            const auto pName = unique_playlists[selected_pl_idx];
+            const bool isDef = (pName == defaultPlaylistName);
+            ImGui::Text("Playlist: %s%s", pName.c_str(), isDef ? " (default)" : "");
             ImGui::Separator();
 
-            if (!activePlaylist.empty() && app.playlist_artwork.contains(activePlaylist) && !app.playlist_artwork[activePlaylist].empty()) {
-                ImGui::Text("Active: %s", narrow(app.playlist_artwork[activePlaylist].filename().wstring()).c_str());
-            } else if (!activePlaylist.empty() && app.generated_playlist_artwork.contains(activePlaylist)) {
+            if (app.playlist_artwork.contains(pName) && !app.playlist_artwork[pName].empty()) {
+                ImGui::Text("Active: %s", narrow(app.playlist_artwork[pName].filename().wstring()).c_str());
+            } else if (app.generated_playlist_artwork.contains(pName)) {
                 ImGui::TextUnformatted("Active: Generated text cover");
             } else {
                 ImGui::TextUnformatted("Active: Automatic (from first track)");
@@ -956,6 +1024,18 @@ void songs_page(App& app, HWND window) {
                 app.generated_playlist_artwork.erase(pName);
                 clear_artwork_preview(app);
                 ImGui::CloseCurrentPopup();
+            }
+
+            if (unique_playlists.size() > 1) {
+                ImGui::Spacing();
+                if (ImGui::Button("Generate Text for All Playlists")) {
+                    for (const auto& n : unique_playlists) {
+                        app.generated_playlist_artwork.insert(n);
+                        app.playlist_artwork[n].clear();
+                    }
+                    request_artwork_preview(app, pName, {}, true);
+                    ImGui::CloseCurrentPopup();
+                }
             }
 
             ImGui::Separator();
@@ -1078,6 +1158,41 @@ void songs_page(App& app, HWND window) {
         ImGui::EndChild();
         ImGui::EndDisabled();
         if (ImGui::Button("Done", ImVec2(S(120), 0))) ImGui::CloseCurrentPopup();
+        ImGui::EndPopup();
+    }
+
+    if (app.show_new_playlist_modal) {
+        ImGui::OpenPopup("New Playlist");
+        app.show_new_playlist_modal = false;
+    }
+    if (ImGui::BeginPopupModal("New Playlist", nullptr, ImGuiWindowFlags_AlwaysAutoResize)) {
+        ImGui::TextUnformatted("Enter a name for the new playlist:");
+        ImGui::Spacing();
+        ImGui::SetNextItemWidth(S(260));
+        if (ImGui::IsWindowAppearing()) ImGui::SetKeyboardFocusHere();
+        const bool enter_pressed = ImGui::InputText("##new_pl_name", app.new_playlist_input.data(), app.new_playlist_input.size(), ImGuiInputTextFlags_EnterReturnsTrue);
+        ImGui::Spacing();
+        const bool has_name = music::usable_name(app.new_playlist_input.data());
+        ImGui::BeginDisabled(!has_name);
+        if (ImGui::Button("Create", ImVec2(S(100), 0)) || (enter_pressed && has_name)) {
+            const std::string new_pl = app.new_playlist_input.data();
+            if (std::find(app.custom_playlists.begin(), app.custom_playlists.end(), new_pl) == app.custom_playlists.end()) {
+                app.custom_playlists.push_back(new_pl);
+            }
+            if (app.new_playlist_row_target >= 0 && app.new_playlist_row_target < static_cast<int>(app.rows.size())) {
+                copy_text(app.rows[app.new_playlist_row_target].playlist, new_pl);
+                app.new_playlist_row_target = -1;
+            }
+            app.active_playlist_filter = new_pl;
+            app.select_playlist_tab = new_pl;
+            ImGui::CloseCurrentPopup();
+        }
+        ImGui::EndDisabled();
+        ImGui::SameLine();
+        if (ImGui::Button("Cancel", ImVec2(S(80), 0)) || ImGui::IsKeyPressed(ImGuiKey_Escape)) {
+            app.new_playlist_row_target = -1;
+            ImGui::CloseCurrentPopup();
+        }
         ImGui::EndPopup();
     }
 
@@ -1207,8 +1322,55 @@ void songs_page(App& app, HWND window) {
             problems[i] = row_problems(app, i);
             if (!problems[i].empty()) ++blocked;
         }
+
+        // Playlist filter tabs (when multiple playlists exist or custom playlists created)
+        if (unique_playlists.size() > 1 || !app.custom_playlists.empty()) {
+            if (ImGui::BeginTabBar("playlist_tabs", ImGuiTabBarFlags_FittingPolicyScroll)) {
+                const std::string all_label = "All (" + std::to_string(app.rows.size()) + ")###tab_all";
+                ImGuiTabItemFlags all_flags = 0;
+                if (app.select_playlist_tab && app.select_playlist_tab->empty()) {
+                    all_flags |= ImGuiTabItemFlags_SetSelected;
+                }
+                if (ImGui::BeginTabItem(all_label.c_str(), nullptr, all_flags)) {
+                    app.active_playlist_filter.clear();
+                    ImGui::EndTabItem();
+                }
+
+                for (const auto& pl : unique_playlists) {
+                    const auto count = playlist_stats[pl].first;
+                    const std::string tab_label = pl + " (" + std::to_string(count) + ")###tab_" + pl;
+                    ImGuiTabItemFlags tab_flags = 0;
+                    if (app.select_playlist_tab && *app.select_playlist_tab == pl) {
+                        tab_flags |= ImGuiTabItemFlags_SetSelected;
+                    }
+                    bool tab_open = true;
+                    bool* p_open = (pl != defaultPlaylistName && count == 0) ? &tab_open : nullptr;
+                    if (ImGui::BeginTabItem(tab_label.c_str(), p_open, tab_flags)) {
+                        app.active_playlist_filter = pl;
+                        ImGui::EndTabItem();
+                    }
+                    if (p_open && !tab_open) {
+                        std::erase(app.custom_playlists, pl);
+                        if (app.active_playlist_filter == pl) app.active_playlist_filter.clear();
+                    }
+                }
+
+                if (ImGui::TabItemButton("+", ImGuiTabItemFlags_Trailing | ImGuiTabItemFlags_NoTooltip)) {
+                    app.show_new_playlist_modal = true;
+                    app.new_playlist_input.fill(0);
+                    app.new_playlist_row_target = -1;
+                }
+                if (ImGui::IsItemHovered()) ImGui::SetTooltip("Create a new playlist");
+
+                ImGui::EndTabBar();
+                app.select_playlist_tab.reset();
+            }
+            ImGui::Spacing();
+        }
+
         const float footer = ImGui::GetFrameHeightWithSpacing() * 3.5f + S(16.0f);
-        std::optional<std::size_t> remove, up, down;
+        std::optional<std::pair<std::size_t, std::size_t>> up_target, down_target;
+        std::optional<std::size_t> remove;
         if (ImGui::BeginTable("songs", 7,
                               ImGuiTableFlags_RowBg | ImGuiTableFlags_BordersOuter | ImGuiTableFlags_BordersInnerH |
                                   ImGuiTableFlags_ScrollY | ImGuiTableFlags_Resizable,
@@ -1217,10 +1379,10 @@ void songs_page(App& app, HWND window) {
             ImGui::TableSetupColumn("#", ImGuiTableColumnFlags_WidthFixed, S(32));
             ImGui::TableSetupColumn("Artist", ImGuiTableColumnFlags_WidthStretch, 1.1f);
             ImGui::TableSetupColumn("Title", ImGuiTableColumnFlags_WidthStretch, 1.3f);
-            ImGui::TableSetupColumn("Playlist (?)", ImGuiTableColumnFlags_WidthStretch, 0.9f);
+            ImGui::TableSetupColumn("Playlist (?)", ImGuiTableColumnFlags_WidthStretch, 1.0f);
             ImGui::TableSetupColumn("Length", ImGuiTableColumnFlags_WidthFixed, S(64));
-            ImGui::TableSetupColumn("Problems", ImGuiTableColumnFlags_WidthStretch, 1.0f);
-            ImGui::TableSetupColumn("Actions", ImGuiTableColumnFlags_WidthFixed, S(160));
+            ImGui::TableSetupColumn("Problems", ImGuiTableColumnFlags_WidthStretch, 0.9f);
+            ImGui::TableSetupColumn("Actions", ImGuiTableColumnFlags_WidthFixed, S(175));
 
             const int columns_count = ImGui::TableGetColumnCount();
             ImGui::TableNextRow(ImGuiTableRowFlags_Headers);
@@ -1230,48 +1392,126 @@ void songs_page(App& app, HWND window) {
                 ImGui::PushID(column_n);
                 ImGui::TableHeader(name);
                 if (column_n == 3 && ImGui::IsItemHovered()) {
-                    ImGui::SetTooltip("Playlist for this song.\nLeave blank to use the default playlist, or type a custom name to group songs into separate playlists.");
+                    ImGui::SetTooltip("Playlist for this song.\nLeave blank to use the default playlist, or select/type a custom name to group songs into separate playlists.");
                 }
                 ImGui::PopID();
             }
 
+            std::size_t visible_count = 0;
             for (std::size_t i = 0; i < app.rows.size(); ++i) {
                 auto& row = app.rows[i];
+                const std::string row_pl = row.playlist[0] ? row.playlist.data() : defaultPlaylistName;
+                if (!app.active_playlist_filter.empty() && row_pl != app.active_playlist_filter) {
+                    continue;
+                }
+                ++visible_count;
+
+                // Find prev index matching current filter
+                std::optional<std::size_t> prev_matching;
+                for (std::size_t k = i; k > 0; --k) {
+                    const std::size_t check_idx = k - 1;
+                    const std::string check_pl = app.rows[check_idx].playlist[0] ? app.rows[check_idx].playlist.data() : defaultPlaylistName;
+                    if (app.active_playlist_filter.empty() || check_pl == app.active_playlist_filter) {
+                        prev_matching = check_idx;
+                        break;
+                    }
+                }
+                // Find next index matching current filter
+                std::optional<std::size_t> next_matching;
+                for (std::size_t check_idx = i + 1; check_idx < app.rows.size(); ++check_idx) {
+                    const std::string check_pl = app.rows[check_idx].playlist[0] ? app.rows[check_idx].playlist.data() : defaultPlaylistName;
+                    if (app.active_playlist_filter.empty() || check_pl == app.active_playlist_filter) {
+                        next_matching = check_idx;
+                        break;
+                    }
+                }
+
                 ImGui::PushID(static_cast<int>(i));
                 ImGui::TableNextRow();
+
+                // # column
                 ImGui::TableNextColumn();
                 ImGui::Text("%zu", i + 1);
-                if (ImGui::IsItemHovered()) ImGui::SetTooltip("%s", narrow(row.file.wstring()).c_str());
+                if (ImGui::IsItemHovered()) ImGui::SetTooltip("%s\n(Right-click for options)", narrow(row.file.wstring()).c_str());
+                if (ImGui::IsItemClicked(ImGuiMouseButton_Right)) ImGui::OpenPopup("row_context");
+
+                // Artist column
                 ImGui::BeginDisabled(busy);
                 ImGui::TableNextColumn();
                 ImGui::SetNextItemWidth(-1);
                 ImGui::InputText("##artist", row.artist.data(), row.artist.size());
+
+                // Title column
                 ImGui::TableNextColumn();
                 ImGui::SetNextItemWidth(-1);
                 ImGui::InputText("##title", row.title.data(), row.title.size());
+
+                // Playlist column
                 ImGui::TableNextColumn();
-                ImGui::SetNextItemWidth(-1);
+                const float arrow_w = ImGui::GetFrameHeight();
+                const float spacing = style.ItemSpacing.x;
+                ImGui::SetNextItemWidth(std::max(S(30.0f), ImGui::GetContentRegionAvail().x - arrow_w - spacing));
                 ImGui::InputTextWithHint("##playlist", app.playlist[0] ? app.playlist.data() : "Default", row.playlist.data(), row.playlist.size());
                 if (ImGui::IsItemHovered()) {
-                    ImGui::SetTooltip("Playlist for this track.\nLeave blank to inherit \"%s\", or type a custom playlist name.", app.playlist[0] ? app.playlist.data() : "Default");
+                    ImGui::SetTooltip("Playlist for this track.\nLeave blank to inherit \"%s\", or select/type a custom name.", app.playlist[0] ? app.playlist.data() : "Default");
+                }
+                ImGui::SameLine(0, spacing);
+                if (ImGui::Button("▼##pl_arrow", ImVec2(arrow_w, 0))) {
+                    ImGui::OpenPopup("PlaylistCellMenu");
+                }
+                if (ImGui::IsItemHovered()) ImGui::SetTooltip("Choose from existing playlists or create new");
+                if (ImGui::BeginPopup("PlaylistCellMenu")) {
+                    ImGui::TextDisabled("Assign to Playlist");
+                    ImGui::Separator();
+                    for (const auto& pl_name : unique_playlists) {
+                        const bool is_curr = (row.playlist[0] ? row.playlist.data() == pl_name : pl_name == defaultPlaylistName);
+                        if (ImGui::MenuItem((pl_name + (pl_name == defaultPlaylistName ? " (default)" : "")).c_str(), nullptr, is_curr)) {
+                            if (pl_name == defaultPlaylistName) {
+                                row.playlist.fill(0);
+                            } else {
+                                copy_text(row.playlist, pl_name);
+                            }
+                        }
+                    }
+                    ImGui::Separator();
+                    if (ImGui::MenuItem("+ New Playlist...")) {
+                        app.new_playlist_row_target = static_cast<int>(i);
+                        app.new_playlist_input.fill(0);
+                        app.show_new_playlist_modal = true;
+                    }
+                    ImGui::EndPopup();
                 }
                 ImGui::EndDisabled();
+
+                // Length column
                 ImGui::TableNextColumn();
                 if (row.scanned) ImGui::Text("%d:%02d", static_cast<int>(row.seconds) / 60, static_cast<int>(row.seconds) % 60);
                 else ImGui::TextDisabled("...");
+                if (ImGui::IsItemClicked(ImGuiMouseButton_Right)) ImGui::OpenPopup("row_context");
+
+                // Problems column
                 ImGui::TableNextColumn();
                 if (!problems[i].empty()) {
                     std::string text;
                     for (const auto& p : problems[i]) text += (text.empty() ? "" : "; ") + p;
                     ImGui::TextColored(ImVec4(1, 0.55f, 0.35f, 1), "%s", text.c_str());
                 }
+                if (ImGui::IsItemClicked(ImGuiMouseButton_Right)) ImGui::OpenPopup("row_context");
+
+                // Actions column
                 ImGui::TableNextColumn();
                 ImGui::BeginDisabled(busy);
-                if (ImGui::ArrowButton("up", ImGuiDir_Up) && i > 0) up = i;
+                ImGui::BeginDisabled(!prev_matching.has_value());
+                if (ImGui::ArrowButton("up", ImGuiDir_Up)) up_target = std::make_pair(i, *prev_matching);
                 if (ImGui::IsItemHovered()) ImGui::SetTooltip("Move song up");
+                ImGui::EndDisabled();
+
                 ImGui::SameLine();
-                if (ImGui::ArrowButton("down", ImGuiDir_Down) && i + 1 < app.rows.size()) down = i;
+                ImGui::BeginDisabled(!next_matching.has_value());
+                if (ImGui::ArrowButton("down", ImGuiDir_Down)) down_target = std::make_pair(i, *next_matching);
                 if (ImGui::IsItemHovered()) ImGui::SetTooltip("Move song down");
+                ImGui::EndDisabled();
+
                 ImGui::SameLine();
                 ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.48f, 0.16f, 0.16f, 0.85f));
                 ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(0.68f, 0.22f, 0.22f, 1.00f));
@@ -1279,21 +1519,96 @@ void songs_page(App& app, HWND window) {
                 if (ImGui::Button("Remove")) remove = i;
                 ImGui::PopStyleColor(3);
                 if (ImGui::IsItemHovered()) ImGui::SetTooltip("Remove this song");
+
+                ImGui::SameLine();
+                if (ImGui::Button("...##more_actions")) {
+                    ImGui::OpenPopup("row_context");
+                }
+                if (ImGui::IsItemHovered()) ImGui::SetTooltip("More options");
                 ImGui::EndDisabled();
+
+                // Row context menu (from right click or '...' button)
+                if (ImGui::BeginPopup("row_context")) {
+                    ImGui::TextDisabled("%s - %s", row.artist.data(), row.title.data());
+                    ImGui::Separator();
+                    if (ImGui::BeginMenu("Assign to Playlist")) {
+                        for (const auto& pl_name : unique_playlists) {
+                            const bool is_curr = (row.playlist[0] ? row.playlist.data() == pl_name : pl_name == defaultPlaylistName);
+                            if (ImGui::MenuItem((pl_name + (pl_name == defaultPlaylistName ? " (default)" : "")).c_str(), nullptr, is_curr)) {
+                                if (pl_name == defaultPlaylistName) {
+                                    row.playlist.fill(0);
+                                } else {
+                                    copy_text(row.playlist, pl_name);
+                                }
+                            }
+                        }
+                        ImGui::Separator();
+                        if (ImGui::MenuItem("+ New Playlist...")) {
+                            app.new_playlist_row_target = static_cast<int>(i);
+                            app.new_playlist_input.fill(0);
+                            app.show_new_playlist_modal = true;
+                        }
+                        ImGui::EndMenu();
+                    }
+                    if (ImGui::BeginMenu("Artwork")) {
+                        if (ImGui::MenuItem("Choose Image...")) {
+                            const auto files = pick(window, false, true);
+                            if (!files.empty()) {
+                                row.artwork = files[0];
+                            }
+                        }
+                        if (!row.artwork.empty() && ImGui::MenuItem("Use Embedded / Automatic Artwork")) {
+                            row.artwork.clear();
+                        }
+                        if (ImGui::MenuItem("Manage All Artwork...")) {
+                            app.show_artwork_modal = true;
+                        }
+                        ImGui::EndMenu();
+                    }
+                    ImGui::Separator();
+                    if (ImGui::MenuItem("Move Up", nullptr, false, prev_matching.has_value() && !busy)) {
+                        if (prev_matching) up_target = std::make_pair(i, *prev_matching);
+                    }
+                    if (ImGui::MenuItem("Move Down", nullptr, false, next_matching.has_value() && !busy)) {
+                        if (next_matching) down_target = std::make_pair(i, *next_matching);
+                    }
+                    ImGui::Separator();
+                    if (ImGui::MenuItem("Remove Song", nullptr, false, !busy)) {
+                        remove = i;
+                    }
+                    ImGui::EndPopup();
+                }
+
                 ImGui::PopID();
             }
+
+            if (visible_count == 0 && !app.active_playlist_filter.empty()) {
+                ImGui::TableNextRow();
+                ImGui::TableSetColumnIndex(1);
+                ImGui::Dummy(ImVec2(0, S(8)));
+                ImGui::TextDisabled("No songs in \"%s\" yet.", app.active_playlist_filter.c_str());
+                ImGui::TextDisabled("Drag audio files here or click 'Add songs...' below to add tracks to this playlist.");
+                ImGui::Dummy(ImVec2(0, S(8)));
+            }
+
             ImGui::EndTable();
         }
-        if (up) std::swap(app.rows[*up], app.rows[*up - 1]);
-        if (down) std::swap(app.rows[*down], app.rows[*down + 1]);
+        if (up_target) std::swap(app.rows[up_target->first], app.rows[up_target->second]);
+        if (down_target) std::swap(app.rows[down_target->first], app.rows[down_target->second]);
         if (remove) app.rows.erase(app.rows.begin() + static_cast<std::ptrdiff_t>(*remove));
 
         ImGui::Spacing();
         // Footer: add songs/folder, summary of count and duration, build / export
         ImGui::BeginDisabled(busy);
         if (ImGui::Button("Add songs...", ImVec2(S(105), S(26)))) add_files(app, pick(window, false));
+        if (!app.active_playlist_filter.empty() && ImGui::IsItemHovered()) {
+            ImGui::SetTooltip("Add songs directly into \"%s\"", app.active_playlist_filter.c_str());
+        }
         ImGui::SameLine();
         if (ImGui::Button("Add folder...", ImVec2(S(105), S(26)))) add_files(app, pick(window, true));
+        if (!app.active_playlist_filter.empty() && ImGui::IsItemHovered()) {
+            ImGui::SetTooltip("Add folder tracks directly into \"%s\"", app.active_playlist_filter.c_str());
+        }
         ImGui::EndDisabled();
 
         ImGui::SameLine();
@@ -1303,7 +1618,11 @@ void songs_page(App& app, HWND window) {
             if (r.scanned) total_seconds += r.seconds;
             else all_scanned = false;
         }
-        std::string summary = std::to_string(app.rows.size()) + " song" + (app.rows.size() == 1 ? "" : "s");
+        std::string summary;
+        if (unique_playlists.size() > 1) {
+            summary = std::to_string(unique_playlists.size()) + " playlists • ";
+        }
+        summary += std::to_string(app.rows.size()) + " song" + (app.rows.size() == 1 ? "" : "s");
         if (!all_scanned) {
             summary += " (scanning tags...)";
         } else {
@@ -1325,6 +1644,24 @@ void songs_page(App& app, HWND window) {
             ImGui::SetCursorPosX(ImGui::GetCursorPosX() + rem_w - summary_w);
         }
         ImGui::TextDisabled("%s", summary.c_str());
+        if (unique_playlists.size() > 1 && ImGui::IsItemHovered()) {
+            if (ImGui::BeginTooltip()) {
+                ImGui::TextUnformatted("Playlist Breakdown");
+                ImGui::Separator();
+                for (const auto& pl : unique_playlists) {
+                    const auto& stats = playlist_stats[pl];
+                    const int sec = static_cast<int>(stats.second);
+                    const int h = sec / 3600;
+                    const int m = (sec % 3600) / 60;
+                    const int s = sec % 60;
+                    char buf[64];
+                    if (h > 0) std::snprintf(buf, sizeof(buf), "%d:%02d:%02d", h, m, s);
+                    else std::snprintf(buf, sizeof(buf), "%d:%02d", m, s);
+                    ImGui::BulletText("%s: %zu song%s (%s)", pl.c_str(), stats.first, stats.first == 1 ? "" : "s", buf);
+                }
+                ImGui::EndTooltip();
+            }
+        }
 
         std::string block;
         if (!music::usable_name(app.name.data())) block = "Give the mod a name.";
