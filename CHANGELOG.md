@@ -7,6 +7,29 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [1.1.0] - 2026-10-05
+
+### Added
+
+- **Multi-playlist management suite**:
+  - Filter track table by playlist using interactive playlist tabs with track count badges (`All`, `Default`, custom playlists, and a `+` new playlist button).
+  - Per-track playlist assignment dropdown button in the table to quickly switch playlists or create a new playlist.
+  - Track context menu (right-click anywhere across track row or click the `...` action button) with quick move-to-playlist, reordering, artwork, and removal options.
+  - Empty table right-click context menu to quickly add songs, folders, create playlists, or manage artwork.
+  - Multi-playlist duration and song count breakdown tooltip when hovering over the table footer summary.
+  - Multi-playlist cover manager popup (`Covers (N)` in the toolbar) with playlist selection, active status badges, live 128x128 preview container, and 1-click batch generation.
+- **Modernized UI**:
+  - Elevated dark header toolbar ribbon with rounded borders and centered controls.
+  - Re-imagined hero empty state dropzone card with a 9-bar vector audio waveform equalizer graphic, centered layout, and quick-add actions.
+  - Real-time footer summary displaying total playlist count, song count, and formatted playback duration.
+
+### Fixed
+
+- **Direct3D 12 texture crash on cover re-generation**: Deferred texture resource release until GPU fence completion, preventing device removal crashes (`DXGI_ERROR_DEVICE_REMOVED` / page fault) when re-generating text covers or changing images while draw calls from previous frames are still in flight.
+- **Preview persistence in covers popup**: Fixed cover previews not updating or disappearing when switching between playlists in the toolbar covers dropdown.
+- **Missing font glyphs**: Replaced unicode bullet `•` in the footer summary with an ASCII pipe ` | ` and replaced unicode dropdown arrows with native `ImGui::ArrowButton` to prevent `?` characters from displaying.
+- **Modal race conditions**: Action buttons in `Playlist Artwork Setup` and `PlaylistCoverPopup` are now disabled while artwork generation or decoding is active.
+
 ## [1.0.1] - 2026-10-05
 
 ### Fixed
