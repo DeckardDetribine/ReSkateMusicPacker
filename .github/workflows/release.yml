@@ -28,7 +28,13 @@ jobs:
         run: |
           New-Item -ItemType Directory -Force -Path package | Out-Null
           Copy-Item build/Release/ReSkateMusicPacker.exe package/
-          Copy-Item LICENSE, README.md package/
+          Copy-Item LICENSE, README.md, NOTICE.md package/
+          New-Item -ItemType Directory -Force -Path package/licenses | Out-Null
+          Copy-Item External/imgui/LICENSE.txt package/licenses/imgui-LICENSE.txt
+          Copy-Item External/rapidjson/LICENSE.txt package/licenses/rapidjson-LICENSE.txt
+          Copy-Item External/lz4/LICENSE package/licenses/lz4-LICENSE
+          Copy-Item External/zstd/LICENSE, External/zstd/COPYING package/licenses/
+          Copy-Item External/miniz/LICENSE.txt package/licenses/miniz-LICENSE.txt
           Compress-Archive -Path package/* -DestinationPath "ReSkateMusicPacker-${{ github.ref_name }}-win64.zip"
 
       - name: Publish

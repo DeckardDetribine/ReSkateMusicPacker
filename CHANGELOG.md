@@ -13,7 +13,7 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   generate a text cover. Covers are 512x512 PNGs saved with the mod and included in Thunderstore
   exports.
 - Documentation: this changelog, a `CONTRIBUTING` guide, a rewritten README, and guides under `docs/`,
-  plus an MIT `LICENSE`.
+  plus a `LICENSE`.
 - A **Settings** dialog (from the toolbar) to change the game folder and ffmpeg after the first-run
   setup, instead of only at startup.
 - **Download ffmpeg automatically**: when ffmpeg/ffprobe are missing, the setup page and the Settings
@@ -24,6 +24,9 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Changed
 
+- **Relicensed from MIT to GPL-3.0**, with attribution: `src/Engine/` is ported from the
+  [ReSkate](https://github.com/Dingo-Shenanigans/ReSkate) project's engine code (Copyright © 2026 the
+  ReSkate contributors, GPL-3.0). See `NOTICE.md`.
 - Loudness normalisation now targets **-15 LUFS** with two-pass `loudnorm`, matching the level of the
   game's own tracks (they measure about -15 LUFS), instead of -16 with a single dynamic pass.
 - ffmpeg/ffprobe now run without a console window, and with their output captured in-process, so the

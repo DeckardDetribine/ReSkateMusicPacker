@@ -8,7 +8,7 @@ and stacks with other mods.
 ![The ReSkate Music Packer window](docs/images/screenshot.png)
 
 - **Documentation:** [`docs/`](docs/index.md)
-- **License:** [MIT](LICENSE)
+- **License:** [GPL-3.0](LICENSE) — includes engine code ported from [ReSkate](https://github.com/Dingo-Shenanigans/ReSkate) (see [NOTICE.md](NOTICE.md))
 
 ## Features
 
@@ -95,4 +95,11 @@ Requires Visual Studio 2022 (v143) and CMake 3.20+. See [docs/building.md](docs/
 
 ## License
 
-[MIT](LICENSE). Bundled third-party libraries under `External/` keep their own licenses.
+Copyright © 2026 DeckardDetribine and the ReSkateMusicPacker contributors. ReSkateMusicPacker is
+free software, distributed under the [GNU General Public License, version 3](LICENSE) (GPL-3.0);
+if you share a modified version, share its source code under the same license.
+
+It includes engine code ported from the [ReSkate](https://github.com/Dingo-Shenanigans/ReSkate)
+project (Copyright © 2026 the ReSkate contributors, also GPL-3.0), which is why this project is
+GPL-3.0 rather than a permissive license. See [NOTICE.md](NOTICE.md) for provenance and for the
+libraries under `External/`, which keep their own licenses.
