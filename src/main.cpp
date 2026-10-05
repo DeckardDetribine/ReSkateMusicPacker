@@ -3,6 +3,7 @@
 // folder. A mod built here can be opened again from its project file and rebuilt.
 // Drawn with Dear ImGui through the launcher's Direct3D 12 renderer (Launcher/gui_renderer.cpp).
 #include "packer.h"
+#include "ffmpeg_fetch.h"
 #include "Engine/Core/Json/json.h"
 #include "gui_renderer.h"
 
@@ -206,6 +207,13 @@ struct ArtworkPreviewResult {
     std::string error;
 };
 
+// A finished ffmpeg download: the install folder on success, or a message fit to show.
+struct FfmpegInstallResult {
+    bool ok{};
+    fs::path folder;
+    std::string error;
+};
+
 struct App {
     Settings settings;
     bool ffmpeg{};
@@ -235,6 +243,7 @@ struct App {
     std::vector<std::pair<fs::path, music::SongInfo>> scanned;  // finished scans to apply
     std::optional<std::pair<bool, std::string>> finished;       // a build's result: ok, message
     std::optional<ArtworkPreviewResult> artwork_preview_ready; // guarded by mutex
+    std::optional<FfmpegInstallResult> ffmpeg_install;          // a download's result, guarded by mutex
 
     std::vector<fs::path> dropped;
     std::mutex dropped_mutex;
@@ -429,6 +438,37 @@ void apply_artwork_preview(App& app) {
         if (!texture) app.artwork_preview_error = "Could not display the cover preview.";
         else app.artwork_preview = texture;
     } catch (const std::exception& error) { app.artwork_preview_error = error.what(); }
+}
+
+// Downloads and installs the pinned ffmpeg build on the one-job worker. Never runs by itself: the
+// button that calls this shows the source, size and licence first.
+void install_ffmpeg(App& app) {
+    if (app.busy) return;
+    start(app, "Downloading ffmpeg", [&app] {
+        FfmpegInstallResult result;
+        try {
+            const fs::path directory = music::default_install_dir();
+            music::ensure_ffmpeg(directory, music::ffmpeg_url(), music::ffmpeg_sha256(),
+                [&app](const music::DownloadProgress& step) {
+                    std::lock_guard lock(app.mutex);
+                    constexpr double megabytes = 1024.0 * 1024.0;
+                    const auto received = static_cast<int>(static_cast<double>(step.received) / megabytes);
+                    if (step.total) {
+                        app.progress = static_cast<float>(static_cast<double>(step.received) / static_cast<double>(step.total));
+                        app.progress_text = std::to_string(received) + " / " +
+                                            std::to_string(static_cast<int>(static_cast<double>(step.total) / megabytes)) + " MB";
+                    } else app.progress_text = std::to_string(received) + " MB";
+                }, &app.cancel);
+            result.ok = true;
+            result.folder = directory;
+        } catch (const music::Cancelled&) {
+            result.error = "Cancelled; ffmpeg was not installed.";
+        } catch (const std::exception& error) {
+            result.error = error.what();
+        }
+        std::lock_guard lock(app.mutex);
+        app.ffmpeg_install = std::move(result);
+    });
 }
 
 void add_files(App& app, const std::vector<fs::path>& paths) {
@@ -676,6 +716,25 @@ void setup_page(App& app, HWND window) {
     }
 }
 
+// The one-click installer, shared by first-run setup and the Settings dialog. Downloading only ever
+// starts from a click here; the source, size and licence sit under the button.
+void ffmpeg_download_controls(App& app, float width) {
+    if (app.busy && app.job == "Downloading ffmpeg") {
+        std::lock_guard lock(app.mutex);
+        const std::string label = app.progress_text.empty() ? "Starting..." : app.progress_text;
+        ImGui::ProgressBar(app.progress, ImVec2(width, S(26)), label.c_str());
+        ImGui::SameLine();
+        if (ImGui::Button("Cancel", ImVec2(-1, S(26)))) app.cancel = true;
+        return;
+    }
+    ImGui::BeginDisabled(app.busy);
+    const bool clicked = ImGui::Button("Download ffmpeg automatically", ImVec2(width, S(32)));
+    ImGui::EndDisabled();
+    ImGui::TextDisabled("Static LGPL build from BtbN/FFmpeg-Builds on GitHub (~163 MB). "
+                        "Downloaded only when you click, then checked against a pinned SHA-256.");
+    if (clicked) install_ffmpeg(app);
+}
+
 void ffmpeg_page(App& app, HWND window) {
     ImGui::Spacing();
     ImGui::TextColored(ImVec4(0.22f, 0.65f, 1.0f, 1.0f), "FFmpeg Dependency Required");
@@ -683,6 +742,10 @@ void ffmpeg_page(App& app, HWND window) {
     ImGui::TextWrapped("The music packer uses ffmpeg to read and encode songs, and cannot find ffmpeg.exe and ffprobe.exe. "
                        "Install ffmpeg (for example a Windows build linked from the official download page), then "
                        "point at the folder that holds ffmpeg.exe.");
+    ImGui::Spacing();
+    ffmpeg_download_controls(app, S(300));
+    ImGui::Spacing();
+    ImGui::TextDisabled("- or install it yourself -");
     ImGui::Spacing();
     if (ImGui::Button("Open the ffmpeg download page", ImVec2(S(240), S(32))))
         ShellExecuteW(nullptr, L"open", L"https://ffmpeg.org/download.html", nullptr, nullptr, SW_SHOWNORMAL);
@@ -726,6 +789,10 @@ void settings_modal(App& app, HWND window) {
     ImGui::TextColored(ImVec4(0.22f, 0.65f, 1.0f, 1.0f), "ffmpeg");
     ImGui::TextWrapped("%s", app.ffmpeg ? "ffmpeg.exe and ffprobe.exe found."
                                         : "Not found - the packer needs ffmpeg.exe and ffprobe.exe.");
+    if (!app.ffmpeg) {
+        ffmpeg_download_controls(app, S(250));
+        ImGui::Spacing();
+    }
     if (ImGui::Button("Open the ffmpeg download page", ImVec2(S(230), S(28))))
         ShellExecuteW(nullptr, L"open", L"https://ffmpeg.org/download.html", nullptr, nullptr, SW_SHOWNORMAL);
     ImGui::SameLine();
@@ -1067,6 +1134,26 @@ void frame(App& app, HWND window) {
     apply_scans(app);
     apply_artwork_preview(app);
     {
+        std::optional<FfmpegInstallResult> install;
+        {
+            std::lock_guard lock(app.mutex);
+            install = std::move(app.ffmpeg_install);
+            app.ffmpeg_install.reset();
+        }
+        if (install) {
+            if (install->ok && find_ffmpeg(install->folder)) {
+                app.settings.ffmpeg = install->folder;
+                save_settings(app.settings);
+                app.ffmpeg = true;
+                set_status(app, "ffmpeg is ready.");
+            } else if (install->ok) {
+                set_status(app, "The ffmpeg download finished, but ffmpeg.exe and ffprobe.exe were not found.", true);
+            } else {
+                set_status(app, install->error.empty() ? "The ffmpeg download failed." : install->error, true);
+            }
+        }
+    }
+    {
         std::lock_guard lock(app.mutex);
         if (app.finished) {
             set_status(app, app.finished->second, !app.finished->first);
@@ -1129,6 +1216,8 @@ int run_cli(int argc, wchar_t** argv) {
     music::PackOptions options;
     std::vector<fs::path> positional;
     bool thunderstore = false;
+    bool get_ffmpeg = false;
+    fs::path ffmpeg_dir;
     std::map<std::string, fs::path> trackArtwork;
     std::string author = "Author", version = "1.0.0";
     for (int i = 1; i < argc; ++i) {
@@ -1148,6 +1237,8 @@ int run_cli(int argc, wchar_t** argv) {
                         "  --playlist-artwork <name> <image>  Cover for a playlist\n"
                         "  --track-artwork <id> <image>       Cover for Artist - Title\n"
                         "  --generate-playlist-artwork <name> Text cover for a playlist\n"
+                        "  --get-ffmpeg [folder]      Download ffmpeg into a folder (default: next to this exe or\n"
+                        "                             %%LOCALAPPDATA%%) and print where it went\n"
                         "  --gui                      Launch graphical user interface\n"
                         "  --help, -h                 Show this help text\n");
             return 0;
@@ -1169,8 +1260,32 @@ int run_cli(int argc, wchar_t** argv) {
         }
         else if (arg == L"--generate-playlist-artwork" && i + 1 < argc)
             options.generated_playlist_artwork.insert(narrow(argv[++i]));
+        else if (arg == L"--get-ffmpeg") {
+            get_ffmpeg = true;
+            if (i + 1 < argc && argv[i + 1][0] != L'-' && argv[i + 1][0] != L'\0') ffmpeg_dir = argv[++i];
+        }
         else if (arg == L"--gui") {}
         else positional.emplace_back(arg);
+    }
+    if (get_ffmpeg) {
+        try {
+            const fs::path directory = ffmpeg_dir.empty() ? music::default_install_dir() : ffmpeg_dir;
+            std::printf("Downloading ffmpeg into %s ...\n", narrow(directory.wstring()).c_str());
+            music::ensure_ffmpeg(directory, music::ffmpeg_url(), music::ffmpeg_sha256(),
+                [](const music::DownloadProgress& step) {
+                    if (step.total)
+                        std::printf("\r  %llu / %llu MB", static_cast<unsigned long long>(step.received >> 20),
+                                    static_cast<unsigned long long>(step.total >> 20));
+                    else
+                        std::printf("\r  %llu MB", static_cast<unsigned long long>(step.received >> 20));
+                    std::fflush(stdout);
+                });
+            std::printf("\nffmpeg -> %s\n", narrow(directory.wstring()).c_str());
+            return 0;
+        } catch (const std::exception& error) {
+            std::fprintf(stderr, "error: %s\n", error.what());
+            return 2;
+        }
     }
     if (positional.size() < 2 || positional.size() > 3 || options.bitrate < 64 || options.bitrate > 320) {
         std::fprintf(stderr, "Usage: ReSkateMusicPacker.exe <game folder> <song folder> [output folder] [options]\n"

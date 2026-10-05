@@ -19,6 +19,10 @@ jobs:
       - name: Build
         run: cmake --build build --config Release
 
+      - name: Verify pinned ffmpeg link
+        shell: pwsh
+        run: ./scripts/check-ffmpeg.ps1
+
       - name: Package
         shell: pwsh
         run: |
