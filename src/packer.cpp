@@ -1,3 +1,5 @@
+// SPDX-FileCopyrightText: 2026 DeckardDetribine and the ReSkateMusicPacker contributors
+// SPDX-License-Identifier: GPL-3.0-only
 // ReSkateMusicPacker: a folder of songs -> a mod that ADDS them to the game's music.
 // Nothing shipped is replaced; every song gets its own assets and audio.
 //

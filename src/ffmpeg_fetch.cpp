@@ -1,3 +1,5 @@
+// SPDX-FileCopyrightText: 2026 DeckardDetribine and the ReSkateMusicPacker contributors
+// SPDX-License-Identifier: GPL-3.0-only
 // Downloads the pinned ffmpeg build and unpacks just the two binaries the packer needs. See
 // ffmpeg_fetch.h for the contract. WinHTTP follows the redirect from github.com to its asset CDN.
 #include "ffmpeg_fetch.h"

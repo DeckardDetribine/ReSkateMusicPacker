@@ -1,3 +1,5 @@
+// SPDX-FileCopyrightText: 2026 DeckardDetribine and the ReSkateMusicPacker contributors
+// SPDX-License-Identifier: GPL-3.0-only
 // The music packer library end to end: two generated tones in, a mod folder out. Needs ffmpeg
 // on PATH and a game folder (argv[1], default F:\Games\ReSkate-1.0.0); without the game it skips.
 #include "packer.h"

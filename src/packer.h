@@ -1,3 +1,5 @@
+// SPDX-FileCopyrightText: 2026 DeckardDetribine and the ReSkateMusicPacker contributors
+// SPDX-License-Identifier: GPL-3.0-only
 // ReSkateMusicPacker as a library: songs in, an add-only music mod out. packer.cpp says how.
 // Needs ffmpeg and ffprobe on PATH. Not thread-safe: one scan or pack at a time (they share a
 // scratch folder in %TEMP%).

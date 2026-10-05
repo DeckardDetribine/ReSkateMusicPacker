@@ -1,4 +1,6 @@
 #!/usr/bin/env pwsh
+# SPDX-FileCopyrightText: 2026 DeckardDetribine and the ReSkateMusicPacker contributors
+# SPDX-License-Identifier: GPL-3.0-only
 # Fails when the pinned ffmpeg download no longer resolves or its bytes changed, so link rot is caught
 # before a release. The URL and hash are read from src/ffmpeg_fetch.cpp so there is one source of truth.
 $ErrorActionPreference = 'Stop'

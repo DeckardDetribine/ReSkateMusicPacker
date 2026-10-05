@@ -1,3 +1,5 @@
+// SPDX-FileCopyrightText: 2026 DeckardDetribine and the ReSkateMusicPacker contributors
+// SPDX-License-Identifier: GPL-3.0-only
 #include "packer.h"
 #include <Windows.h>
 #include <wincodec.h>

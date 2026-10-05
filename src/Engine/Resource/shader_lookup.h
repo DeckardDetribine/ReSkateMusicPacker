@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: 2026 DeckardDetribine and the ReSkateMusicPacker contributors
+// SPDX-FileCopyrightText: 2026 the ReSkate contributors
+// SPDX-License-Identifier: GPL-3.0-only
+// Ported from the ReSkate project (https://github.com/Dingo-Shenanigans/ReSkate); see NOTICE.md.
 #pragma once
 
 // The two shader lookup tables a level superbundle carries. A map mod adds a

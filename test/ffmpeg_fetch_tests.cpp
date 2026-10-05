@@ -1,3 +1,5 @@
+// SPDX-FileCopyrightText: 2026 DeckardDetribine and the ReSkateMusicPacker contributors
+// SPDX-License-Identifier: GPL-3.0-only
 // Offline tests for ffmpeg_fetch: the SHA-256 check, zip extraction from memory, and the whole
 // download -> verify -> extract path using a local fixture archive instead of the network.
 #include "ffmpeg_fetch.h"

@@ -1,3 +1,5 @@
+// SPDX-FileCopyrightText: 2026 DeckardDetribine and the ReSkateMusicPacker contributors
+// SPDX-License-Identifier: GPL-3.0-only
 // ReSkateMusicMaker: a window over the music packer library (MusicPacker/packer.h). Songs in a
 // list (dropped or added), their artist and title editable, then built into the game's Mods
 // folder. A mod built here can be opened again from its project file and rebuilt.

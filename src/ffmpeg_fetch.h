@@ -1,3 +1,5 @@
+// SPDX-FileCopyrightText: 2026 DeckardDetribine and the ReSkateMusicPacker contributors
+// SPDX-License-Identifier: GPL-3.0-only
 // Fetches and installs ffmpeg.exe + ffprobe.exe when they are missing. Windows-only: the download
 // goes through WinHTTP (the system proxy), and the pinned archive is verified with SHA-256 before
 // anything is extracted. Nothing here runs on its own; the GUI and CLI call it after an explicit click.

@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: 2026 DeckardDetribine and the ReSkateMusicPacker contributors
+// SPDX-FileCopyrightText: 2026 the ReSkate contributors
+// SPDX-License-Identifier: GPL-3.0-only
+// Ported from the ReSkate project (https://github.com/Dingo-Shenanigans/ReSkate); see NOTICE.md.
 #include "cas_codec.h"
 
 #ifdef _WIN32

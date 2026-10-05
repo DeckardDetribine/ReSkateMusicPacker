@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: 2026 DeckardDetribine and the ReSkateMusicPacker contributors
+// SPDX-FileCopyrightText: 2026 the ReSkate contributors
+// SPDX-License-Identifier: GPL-3.0-only
+// Ported from the ReSkate project (https://github.com/Dingo-Shenanigans/ReSkate); see NOTICE.md.
 #pragma once
 // Read access to a data layer's cas archives: <root>/Win32/<package>/cas_NN.cas,
 // with each install chunk's package directory taken from layout.toc.
