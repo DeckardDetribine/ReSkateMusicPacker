@@ -850,8 +850,8 @@ void songs_page(App& app, HWND window) {
     if (ImGui::IsItemHovered()) ImGui::SetTooltip("Mod name (used for the mod folder in Mods/)");
     ImGui::SameLine();
     ImGui::SetNextItemWidth(S(180));
-    ImGui::InputTextWithHint("##playlist", "Playlist name (in-game)", app.playlist.data(), app.playlist.size());
-    if (ImGui::IsItemHovered()) ImGui::SetTooltip("Playlist name shown in skate. audio settings");
+    ImGui::InputTextWithHint("##playlist", "Default playlist", app.playlist.data(), app.playlist.size());
+    if (ImGui::IsItemHovered()) ImGui::SetTooltip("Default playlist name in skate. Songs use this unless overridden in the table below.");
     ImGui::SameLine();
 
     const std::string activePlaylist = app.playlist[0] ? app.playlist.data() : "";
@@ -1043,11 +1043,24 @@ void songs_page(App& app, HWND window) {
         ImGui::TableSetupColumn("#", ImGuiTableColumnFlags_WidthFixed, S(32));
         ImGui::TableSetupColumn("Artist", ImGuiTableColumnFlags_WidthStretch, 1.1f);
         ImGui::TableSetupColumn("Title", ImGuiTableColumnFlags_WidthStretch, 1.3f);
-        ImGui::TableSetupColumn("Playlist", ImGuiTableColumnFlags_WidthStretch, 0.9f);
+        ImGui::TableSetupColumn("Playlist (?)", ImGuiTableColumnFlags_WidthStretch, 0.9f);
         ImGui::TableSetupColumn("Length", ImGuiTableColumnFlags_WidthFixed, S(64));
         ImGui::TableSetupColumn("Problems", ImGuiTableColumnFlags_WidthStretch, 1.0f);
         ImGui::TableSetupColumn("Actions", ImGuiTableColumnFlags_WidthFixed, S(160));
-        ImGui::TableHeadersRow();
+
+        const int columns_count = ImGui::TableGetColumnCount();
+        ImGui::TableNextRow(ImGuiTableRowFlags_Headers);
+        for (int column_n = 0; column_n < columns_count; column_n++) {
+            if (!ImGui::TableSetColumnIndex(column_n)) continue;
+            const char* name = ImGui::TableGetColumnName(column_n);
+            ImGui::PushID(column_n);
+            ImGui::TableHeader(name);
+            if (column_n == 3 && ImGui::IsItemHovered()) {
+                ImGui::SetTooltip("Playlist for this song.\nLeave blank to use the default playlist, or type a custom name to group songs into separate playlists.");
+            }
+            ImGui::PopID();
+        }
+
         for (std::size_t i = 0; i < app.rows.size(); ++i) {
             auto& row = app.rows[i];
             ImGui::PushID(static_cast<int>(i));
@@ -1065,6 +1078,9 @@ void songs_page(App& app, HWND window) {
             ImGui::TableNextColumn();
             ImGui::SetNextItemWidth(-1);
             ImGui::InputTextWithHint("##playlist", app.playlist[0] ? app.playlist.data() : "Default", row.playlist.data(), row.playlist.size());
+            if (ImGui::IsItemHovered()) {
+                ImGui::SetTooltip("Playlist for this track.\nLeave blank to inherit \"%s\", or type a custom playlist name.", app.playlist[0] ? app.playlist.data() : "Default");
+            }
             ImGui::EndDisabled();
             ImGui::TableNextColumn();
             if (row.scanned) ImGui::Text("%d:%02d", static_cast<int>(row.seconds) / 60, static_cast<int>(row.seconds) % 60);
