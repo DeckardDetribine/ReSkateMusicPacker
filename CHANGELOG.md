@@ -7,6 +7,13 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [1.1.1] - 2026-10-05
+
+### Added
+
+- **Thunderstore Export**:
+  - Optional discreet *"Packaged with [ReSkate Music Packer]"* footer link in auto-generated READMEs, with a toggle checkbox in the export dialog and a `--no-readme-credit` CLI flag.
+
 ## [1.1.0] - 2026-10-05
 
 ### Added
@@ -22,8 +29,6 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   - Elevated dark header toolbar ribbon with rounded borders and centered controls.
   - Re-imagined hero empty state dropzone card with a 9-bar vector audio waveform equalizer graphic, centered layout, and quick-add actions.
   - Real-time footer summary displaying total playlist count, song count, and formatted playback duration.
-- **Thunderstore Export**:
-  - Optional discreet *"Packaged with [ReSkate Music Packer]"* footer link in auto-generated READMEs, with a toggle checkbox in the export dialog and a `--no-readme-credit` CLI flag.
 
 ### Fixed
 
