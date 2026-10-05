@@ -161,6 +161,23 @@ int wmain(int argc, wchar_t** argv) {
     check(zipBytes.find("cover-0.png") != std::string::npos, "thunderstore zip contains artwork");
     fs::remove(zip);
 
+    const auto customOutDir = root / L"custom_export_dir";
+    fs::create_directories(customOutDir);
+    music::ThunderstoreOptions customTsOpts;
+    customTsOpts.author = "CustomAuthor";
+    customTsOpts.version = "2.0.0";
+    customTsOpts.output = customOutDir;
+    customTsOpts.icon = cover;
+    const auto customZip = music::export_thunderstore(options.output, customTsOpts);
+    check(fs::exists(customZip), "custom directory thunderstore zip created");
+    check(customZip.parent_path() == customOutDir, "zip created inside custom directory");
+    check(customZip.filename() == L"CustomAuthor-ReSkateMusic-2.0.0.zip", "custom zip has expected name");
+    check(fs::file_size(customZip) > 1000, "custom thunderstore zip has content");
+    const auto customZipBytes = slurp(customZip);
+    check(customZipBytes.find("icon.png") != std::string::npos, "custom thunderstore zip contains icon.png");
+    fs::remove(customZip);
+    fs::remove_all(customOutDir);
+
     std::atomic<bool> cancel = true;
     options.output = root / L"cancelled";
     try {

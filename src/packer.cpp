@@ -1369,17 +1369,32 @@ fs::path export_thunderstore(const fs::path& modFolder, const ThunderstoreOption
     write_file(staging / L"README.md", text(readme));
 
     if (!options.icon.empty() && fs::exists(options.icon)) {
-        fs::copy_file(options.icon, staging / L"icon.png", fs::copy_options::overwrite_existing, ec);
+        bool converted = false;
+        try {
+            constexpr wchar_t icon_filter[] =
+                L"scale=256:256:force_original_aspect_ratio=decrease,pad=256:256:(ow-iw)/2:(oh-ih)/2:color=black@0,setsar=1";
+            run(L"ffmpeg -y -v error -i \"" + options.icon.wstring() +
+                L"\" -an -vf \"" + icon_filter + L"\" -frames:v 1 -update 1 \"" +
+                (staging / L"icon.png").wstring() + L"\"");
+            if (fs::is_regular_file(staging / L"icon.png") && fs::file_size(staging / L"icon.png") > 0) {
+                converted = true;
+            }
+        } catch (...) {}
+        if (!converted) {
+            fs::copy_file(options.icon, staging / L"icon.png", fs::copy_options::overwrite_existing, ec);
+        }
     } else if (fs::exists(modFolder / L"icon.png")) {
         fs::copy_file(modFolder / L"icon.png", staging / L"icon.png", fs::copy_options::overwrite_existing, ec);
     } else {
         write_file(staging / L"icon.png", create_default_icon_png());
     }
 
+    const auto zipName = widen(author + "-" + name + "-" + version + ".zip");
     fs::path outZip = options.output;
     if (outZip.empty()) {
-        const auto zipName = widen(author + "-" + name + "-" + version + ".zip");
         outZip = modFolder.parent_path() / zipName;
+    } else if (fs::is_directory(outZip, ec)) {
+        outZip = outZip / zipName;
     }
     if (fs::exists(outZip, ec)) fs::remove(outZip, ec);
 
@@ -1390,6 +1405,7 @@ fs::path export_thunderstore(const fs::path& modFolder, const ThunderstoreOption
         throw std::runtime_error("Failed to create Thunderstore package at " + narrow(outZip.wstring()));
 
     return outZip;
+
 }
 
 } // namespace music

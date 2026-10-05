@@ -255,6 +255,8 @@ struct App {
     std::array<char, 32> ts_version{"1.0.0"};
     std::array<char, 256> ts_description{};
     fs::path ts_icon;
+    fs::path ts_output_folder;
+    bool ts_open_explorer = true;
 
     std::map<std::string, ExternalSong> external_songs;
 } *g_app;
@@ -1087,16 +1089,44 @@ void songs_page(App& app, HWND window) {
         ImGui::Spacing();
         if (!app.ts_icon.empty()) {
             ImGui::Text("Icon: %s", narrow(app.ts_icon.filename().wstring()).c_str());
+            if (ImGui::IsItemHovered()) ImGui::SetTooltip("%s", narrow(app.ts_icon.wstring()).c_str());
             ImGui::SameLine();
-            if (ImGui::Button("Clear")) app.ts_icon.clear();
+            if (ImGui::Button("Clear##ts_icon")) app.ts_icon.clear();
         } else {
             ImGui::TextDisabled("Icon: Default (auto-generated 256x256)");
             ImGui::SameLine();
-            if (ImGui::Button("Browse...")) {
-                const auto picked = pick(window, false);
+            if (ImGui::Button("Browse...##ts_icon")) {
+                const auto picked = pick(window, false, true);
                 if (!picked.empty()) app.ts_icon = picked[0];
             }
         }
+        ImGui::Spacing();
+
+        const auto mod = output_folder(app);
+        const auto defaultFolder = mod.parent_path();
+        const auto effectiveFolder = !app.ts_output_folder.empty() ? app.ts_output_folder : defaultFolder;
+
+        ImGui::Text("Output folder: %s", narrow(effectiveFolder.filename().wstring().empty() ? effectiveFolder.wstring() : effectiveFolder.filename().wstring()).c_str());
+        if (ImGui::IsItemHovered()) ImGui::SetTooltip("%s", narrow(effectiveFolder.wstring()).c_str());
+        ImGui::SameLine();
+        if (ImGui::Button("Browse...##ts_out")) {
+            const auto folders = pick(window, true);
+            if (!folders.empty()) app.ts_output_folder = folders[0];
+        }
+        if (!app.ts_output_folder.empty()) {
+            ImGui::SameLine();
+            if (ImGui::Button("Reset##ts_out")) app.ts_output_folder.clear();
+        }
+
+        const auto authorStr = app.ts_author[0] ? app.ts_author.data() : "Author";
+        const auto versionStr = app.ts_version[0] ? app.ts_version.data() : "1.0.0";
+        const auto modNameStr = app.name[0] ? app.name.data() : "ReSkateMusic";
+        const auto expectedZipName = std::string(authorStr) + "-" + modNameStr + "-" + versionStr + ".zip";
+        ImGui::TextDisabled("Package: %s", expectedZipName.c_str());
+
+        ImGui::Spacing();
+        ImGui::Checkbox("Show in File Explorer when finished", &app.ts_open_explorer);
+
         ImGui::Spacing();
         ImGui::Separator();
         ImGui::Spacing();
@@ -1105,7 +1135,6 @@ void songs_page(App& app, HWND window) {
         ImGui::PushStyleColor(ImGuiCol_ButtonActive, ImVec4(0.13f, 0.38f, 0.68f, 1.00f));
         if (ImGui::Button("Export ZIP", ImVec2(S(140), S(30)))) {
             try {
-                const auto mod = output_folder(app);
                 if (!fs::exists(mod / L"layout.toc")) {
                     set_status(app, "Build the mod first before exporting.", true);
                 } else {
@@ -1114,9 +1143,19 @@ void songs_page(App& app, HWND window) {
                     opts.version = app.ts_version.data();
                     opts.description = app.ts_description.data();
                     opts.icon = app.ts_icon;
+                    opts.output = effectiveFolder;
                     const auto zip = music::export_thunderstore(mod, opts);
-                    set_status(app, "Exported: " + narrow(zip.filename().wstring()));
-                    ShellExecuteW(nullptr, L"select", zip.c_str(), nullptr, nullptr, SW_SHOWNORMAL);
+                    set_status(app, "Exported: " + narrow(zip.wstring()));
+                    if (app.ts_open_explorer) {
+                        PIDLIST_ABSOLUTE pidl = ILCreateFromPathW(zip.c_str());
+                        if (pidl) {
+                            SHOpenFolderAndSelectItems(pidl, 0, nullptr, 0);
+                            ILFree(pidl);
+                        } else {
+                            ShellExecuteW(nullptr, L"open", L"explorer.exe",
+                                (L"/select,\"" + zip.wstring() + L"\"").c_str(), nullptr, SW_SHOWNORMAL);
+                        }
+                    }
                 }
             } catch (const std::exception& error) {
                 set_status(app, error.what(), true);

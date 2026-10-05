@@ -7,6 +7,18 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [1.0.1] - 2026-10-05
+
+### Fixed
+
+- Thunderstore icon picker now filters for images (`.png`, `.jpg`, `.jpeg`, `.webp`, `.bmp`) by default instead of audio files.
+- Thunderstore custom icons are now scaled and converted to standard 256x256 PNGs.
+- Fixed File Explorer auto-reveal failing silently when exporting a Thunderstore package.
+
+### Added
+
+- Thunderstore export dialog now allows selecting a custom output folder, previews the target package path, and displays the full export path in the status bar.
+
 ## [1.0.0] - 2026-10-05
 
 ### Added
