@@ -26,6 +26,7 @@ Run with no arguments (or `--gui`) for the graphical interface.
 | `--playlist-artwork <name> <image>` | Cover image for the named playlist. | None |
 | `--track-artwork <id> <image>` | Cover for the exact `Artist - Title` song id; repeat for several. | None |
 | `--generate-playlist-artwork <name>` | Generate a text cover from the playlist name. | Off |
+| `--get-ffmpeg [folder]` | Download the pinned static ffmpeg build and print the install path, then exit. | `.` or `%LOCALAPPDATA%` |
 | `--gui` | Force the graphical interface. | |
 | `--help`, `-h` | Show usage. | |
 
@@ -55,6 +56,18 @@ Generated playlist cover instead of an image:
 ```powershell
 ReSkateMusicPacker.exe "F:\Games\ReSkate-1.0.0" "C:\Music\My Mix" --generate-playlist-artwork "My Mix"
 ```
+
+Fetch ffmpeg (no game or songs needed):
+
+```powershell
+ReSkateMusicPacker.exe --get-ffmpeg
+ReSkateMusicPacker.exe --get-ffmpeg "C:\Tools\ffmpeg"
+```
+
+`--get-ffmpeg` downloads the same pinned static LGPL build (BtbN/FFmpeg-Builds) the GUI button uses,
+verifies its SHA-256, extracts `ffmpeg.exe` + `ffprobe.exe` and prints the folder. With no folder it
+installs beside the exe when writable, else under `%LOCALAPPDATA%\ReSkateMusicPacker\ffmpeg`.
+`FFMPEG_URL` and `FFMPEG_SHA256` override the pinned source.
 
 ## Caching
 

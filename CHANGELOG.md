@@ -16,6 +16,11 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   plus an MIT `LICENSE`.
 - A **Settings** dialog (from the toolbar) to change the game folder and ffmpeg after the first-run
   setup, instead of only at startup.
+- **Download ffmpeg automatically**: when ffmpeg/ffprobe are missing, the setup page and the Settings
+  dialog can fetch a pinned static LGPL build (BtbN/FFmpeg-Builds) into `.\ffmpeg` beside the app or
+  `%LOCALAPPDATA%\ReSkateMusicPacker\ffmpeg`. Only a click starts it; the archive is verified against
+  a pinned SHA-256 before extraction, and `FFMPEG_URL` / `FFMPEG_SHA256` override the source. The CLI
+  gets `--get-ffmpeg [folder]` for the same, headlessly.
 
 ### Changed
 

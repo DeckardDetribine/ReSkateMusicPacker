@@ -26,14 +26,18 @@ and stacks with other mods.
   don't collide with an existing song id.
 - **Thunderstore export** - one click to a Thunderstore-ready `.zip` (`manifest.json`, generated
   README/tracklist, 256x256 icon).
+- **One-click ffmpeg install** - if ffmpeg/ffprobe are missing, download a pinned static LGPL build
+  (BtbN/FFmpeg-Builds) into `.\ffmpeg` beside the app or `%LOCALAPPDATA%\ReSkateMusicPacker\ffmpeg`,
+  verified against a SHA-256 before it is used.
 - **High-DPI aware** - per-monitor v2 DPI scaling.
 
 ## Requirements
 
 - Windows 10/11 (x64).
 - **[ffmpeg](https://ffmpeg.org/) and ffprobe** on your `PATH`, or in a folder you point the GUI at. They do the decoding,
-  Opus encoding, album-art extraction, and loudness measurement. ffmpeg is only needed to *build* mods,
-  not to play them in game.
+  Opus encoding, album-art extraction, and loudness measurement. If they're missing, the GUI's
+  **Download ffmpeg automatically** button fetches a pinned static LGPL build for you (only when you
+  click it). ffmpeg is only needed to *build* mods, not to play them in game.
 - **No installer and no Visual C++ redistributable.** The executable is self-contained (statically
   linked) and uses only Windows system libraries.
 - A **ReSkate runtime that reads `reskate-music.json`** (mod playlists). Cover art additionally needs

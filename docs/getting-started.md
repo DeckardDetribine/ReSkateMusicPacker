@@ -20,8 +20,12 @@ If you don't have a release build, see [Building from source](building.md).
 Run `ReSkateMusicPacker.exe` with no arguments, or double-click it.
 
 1. **Game folder** - point it at the install with `Skate.exe`. The tool checks for the file.
-2. **ffmpeg** - if ffmpeg/ffprobe aren't on `PATH`, point this at the folder containing them. Both
-   settings are remembered in `%APPDATA%\ReSkateMusicPacker\settings.json`.
+2. **ffmpeg** - if ffmpeg/ffprobe aren't on `PATH`, point this at the folder containing them, or click
+   **Download ffmpeg automatically** to fetch a pinned static LGPL build (from
+   [BtbN/FFmpeg-Builds](https://github.com/BtbN/FFmpeg-Builds)) into `.\ffmpeg` beside the app when
+   that folder is writable, otherwise `%LOCALAPPDATA%\ReSkateMusicPacker\ffmpeg`. The download only
+   starts from the click, and the archive is checked against a pinned SHA-256 before anything is
+   extracted. Both settings are remembered in `%APPDATA%\ReSkateMusicPacker\settings.json`.
 3. **Add songs** - drag files or a folder onto the window, or use the picker. Each song shows its
    artist/title (from tags, else the file name) and an artwork thumbnail.
 4. **Name and playlist** - give the mod a name and the playlist it should appear under in the in-game

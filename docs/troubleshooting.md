@@ -5,6 +5,25 @@
 The packer needs both `ffmpeg.exe` and `ffprobe.exe`. Put them on your `PATH`, or point the GUI's
 ffmpeg field at the folder that contains them. A full ffmpeg build includes both.
 
+If you'd rather not install it yourself, the **Download ffmpeg automatically** button (first-run setup
+or **Settings...**) fetches a pinned static LGPL build from
+[BtbN/FFmpeg-Builds](https://github.com/BtbN/FFmpeg-Builds) into `.\ffmpeg` beside the app when that
+folder is writable, otherwise `%LOCALAPPDATA%\ReSkateMusicPacker\ffmpeg`.
+
+## The automatic ffmpeg download fails
+
+- **Offline / blocked / a corporate proxy**: the download uses the Windows system proxy (WinHTTP) but
+  needs to reach `github.com` and its asset host. Point the tool at a local ffmpeg folder instead
+  (**Locate ffmpeg...**), or set `FFMPEG_URL` (and `FFMPEG_SHA256`) to a mirror.
+- **HTTP 404**: the pinned release was pruned. Set `FFMPEG_URL` to a current asset and `FFMPEG_SHA256`
+  to its SHA-256, or use **Locate ffmpeg...**. Release builds also re-check the pinned link before
+  packaging, so this is normally caught before a release ships.
+- **"did not match its expected checksum"**: the download was corrupted or the pinned asset changed.
+  Retry; if it persists, update `FFMPEG_URL`/`FFMPEG_SHA256`.
+- **SmartScreen / antivirus** may flag a freshly downloaded `ffmpeg.exe` because it is new and
+  unsigned. That is expected for a first-run download; allow it, or install ffmpeg yourself.
+- The download is about **163 MB** and is only started when you click, never on startup.
+
 ## Song clash warning
 
 Every song id is the string `Artist - Title`. If a song's id already exists in another installed mod
@@ -47,3 +66,4 @@ generated `README.md` tracklist and a 256x256 `icon.png`.
 
 - Settings: `%APPDATA%\ReSkateMusicPacker\settings.json`
 - Encode cache: `%LOCALAPPDATA%\ReSkateMusicPacker\cache\` (delete to force a full re-encode)
+- Downloaded ffmpeg: `.\ffmpeg` beside the app (portable) or `%LOCALAPPDATA%\ReSkateMusicPacker\ffmpeg`
