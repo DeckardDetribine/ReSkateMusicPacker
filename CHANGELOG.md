@@ -7,6 +7,23 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+
+- **macOS and Linux builds**: the same GUI (SDL2 instead of Win32/Direct3D 12) and CLI. The game's
+  Oodle-compressed CAS data is read with the open-source ooz decoder (`External/ooz`); the mod's own
+  CAS blocks are written uncompressed there. Native file dialogs (NSOpenPanel; zenity/kdialog), an
+  app bundle on macOS, Homebrew/MacPorts on the PATH of a Finder-launched app, ReSkate's content
+  cache found inside Proton/Wine prefixes, and case-insensitive lookup of the game's files on Linux.
+- CI builds and tests macOS (Apple Silicon) and Linux (GCC and Clang) beside Windows.
+- `cas_codec_tests`: Kraken/Selkie/Leviathan fixtures through `decode_cas()` off Windows.
+
+### Changed
+
+- ffmpeg/ffprobe run with an argument list (no command line to quote), so file names with quotes,
+  `$` or backticks reach them unchanged on every platform.
+- SHA-1/SHA-256 are computed in portable code (`src/sha.cpp`) instead of BCrypt.
+- Platform code is split out: `platform_*.cpp`, `file_dialog_*`, `artwork_*.cpp`, `gui_renderer_*`.
+
 ## [1.1.2] - 2026-10-05
 
 ### Added

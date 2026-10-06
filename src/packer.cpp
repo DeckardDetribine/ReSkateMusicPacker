@@ -24,9 +24,10 @@
 #include "miniz.h"
 #include "Engine/Resource/ebx_writer.h"
 #include "Engine/Vfs/game_bundles.h"
-#include <Windows.h>
-#include <bcrypt.h>
-#include <combaseapi.h>
+#include "Engine/Core/Platform/path_case.h"
+#include "Engine/Core/Platform/path_text.h"
+#include "platform.h"
+#include "sha.h"
 #include <algorithm>
 #include <array>
 #include <cctype>
@@ -37,6 +38,8 @@
 #include <fstream>
 #include <iterator>
 #include <map>
+#include <mutex>
+#include <random>
 #include <set>
 #include <span>
 #include <stdexcept>
@@ -86,19 +89,11 @@ void write_file(const fs::path& path, std::span<const std::byte> bytes) {
     if (!out) throw std::runtime_error("Cannot write " + path.string());
 }
 
-std::vector<std::byte> hash(LPCWSTR algorithm, std::span<const std::byte> bytes, ULONG size) {
-    BCRYPT_ALG_HANDLE handle{};
-    if (BCryptOpenAlgorithmProvider(&handle, algorithm, nullptr, 0) < 0) throw std::runtime_error("Cannot open a hash");
-    std::vector<std::byte> digest(size);
-    const auto status = BCryptHash(handle, nullptr, 0, const_cast<PUCHAR>(reinterpret_cast<const unsigned char*>(bytes.data())),
-                                   static_cast<ULONG>(bytes.size()), reinterpret_cast<PUCHAR>(digest.data()), size);
-    BCryptCloseAlgorithmProvider(handle, 0);
-    if (status < 0) throw std::runtime_error("Hashing failed");
-    return digest;
-}
 fb::Sha1 sha1_of(std::span<const std::byte> bytes) {
+    music::Sha1 hash;
+    hash.update(bytes);
+    const auto digest = hash.finish();
     fb::Sha1 result;
-    const auto digest = hash(BCRYPT_SHA1_ALGORITHM, bytes, 20);
     std::memcpy(result.bytes.data(), digest.data(), 20);
     return result;
 }
@@ -109,97 +104,43 @@ std::string to_hex(const fb::Sha1& sha) {
     return std::string(hex, 40);
 }
 fb::Sha1 sha1_of_file(const fs::path& path) {
-    BCRYPT_ALG_HANDLE alg{};
-    if (BCryptOpenAlgorithmProvider(&alg, BCRYPT_SHA1_ALGORITHM, nullptr, 0) < 0)
-        throw std::runtime_error("Cannot open hash provider");
-    BCRYPT_HASH_HANDLE h{};
-    if (BCryptCreateHash(alg, &h, nullptr, 0, nullptr, 0, 0) < 0) {
-        BCryptCloseAlgorithmProvider(alg, 0);
-        throw std::runtime_error("Cannot create hash");
-    }
-    std::ifstream in(path, std::ios::binary);
-    if (!in) {
-        BCryptDestroyHash(h);
-        BCryptCloseAlgorithmProvider(alg, 0);
-        throw std::runtime_error("Cannot read " + path.string());
-    }
-    char buf[65536];
-    while (in.read(buf, sizeof(buf)) || in.gcount() > 0) {
-        BCryptHashData(h, reinterpret_cast<PUCHAR>(buf), static_cast<ULONG>(in.gcount()), 0);
-    }
+    const auto digest = music::sha1_file(path);
     fb::Sha1 result;
-    BCryptFinishHash(h, reinterpret_cast<PUCHAR>(result.bytes.data()), static_cast<ULONG>(result.bytes.size()), 0);
-    BCryptDestroyHash(h);
-    BCryptCloseAlgorithmProvider(alg, 0);
+    std::memcpy(result.bytes.data(), digest.data(), 20);
     return result;
 }
+// A random (version 4) GUID, laid out as CoCreateGuid's in memory.
 fb::Guid new_guid() {
-    GUID guid;
-    if (CoCreateGuid(&guid) != S_OK) throw std::runtime_error("Cannot create a GUID");
+    static std::mutex mutex;
+    static std::random_device device;
+    static std::mt19937_64 random{(static_cast<std::uint64_t>(device()) << 32) ^ device()};
     fb::Guid result;
-    std::memcpy(result.bytes.data(), &guid, 16);
+    {
+        std::lock_guard lock(mutex);
+        for (std::size_t i = 0; i < 16; i += 8) {
+            const auto value = random();
+            std::memcpy(result.bytes.data() + i, &value, 8);
+        }
+    }
+    result.bytes[7] = static_cast<std::byte>((std::to_integer<unsigned>(result.bytes[7]) & 0x0F) | 0x40);
+    result.bytes[8] = static_cast<std::byte>((std::to_integer<unsigned>(result.bytes[8]) & 0x3F) | 0x80);
     return result;
 }
 
-std::wstring widen(const std::string& text) {
-    std::wstring wide(MultiByteToWideChar(CP_UTF8, 0, text.data(), static_cast<int>(text.size()), nullptr, 0), L'\0');
-    MultiByteToWideChar(CP_UTF8, 0, text.data(), static_cast<int>(text.size()), wide.data(), static_cast<int>(wide.size()));
-    return wide;
-}
-std::string narrow(const std::wstring& text) {
-    std::string utf8(WideCharToMultiByte(CP_UTF8, 0, text.data(), static_cast<int>(text.size()), nullptr, 0, nullptr, nullptr), '\0');
-    WideCharToMultiByte(CP_UTF8, 0, text.data(), static_cast<int>(text.size()), utf8.data(), static_cast<int>(utf8.size()), nullptr, nullptr);
-    return utf8;
-}
-// Runs a command line (no shell) with no console window, so the GUI never flashes a terminal.
-// Captures stdout+stderr when asked; `exit_code` receives the process exit code.
-std::string run_process(const std::wstring& command, bool capture, DWORD& exit_code) {
-    SECURITY_ATTRIBUTES attributes{sizeof(attributes), nullptr, TRUE};
-    HANDLE read_pipe = nullptr, write_pipe = nullptr;
-    if (capture && !CreatePipe(&read_pipe, &write_pipe, &attributes, 0)) { exit_code = 1; return {}; }
-    if (read_pipe) SetHandleInformation(read_pipe, HANDLE_FLAG_INHERIT, 0);
+using platform::narrow;
+using platform::widen;
+using dingosdk::path_utf8;
+using dingosdk::resolve_case;
 
-    STARTUPINFOW startup{sizeof(startup)};
-    startup.dwFlags = STARTF_USESHOWWINDOW;
-    startup.wShowWindow = SW_HIDE;
-    if (capture) {
-        startup.dwFlags |= STARTF_USESTDHANDLES;
-        startup.hStdOutput = write_pipe;
-        startup.hStdError = write_pipe;
-        startup.hStdInput = nullptr;
-    }
-    PROCESS_INFORMATION process{};
-    std::wstring line = command;
-    const BOOL started = CreateProcessW(nullptr, line.data(), nullptr, nullptr, capture ? TRUE : FALSE,
-                                        CREATE_NO_WINDOW, nullptr, nullptr, &startup, &process);
-    if (write_pipe) CloseHandle(write_pipe);
-    if (!started) {
-        if (read_pipe) CloseHandle(read_pipe);
-        exit_code = static_cast<DWORD>(-1);
-        return {};
-    }
+// A program and its arguments, run without a shell (platform::run_process), so a file name with
+// quotes, spaces or $ reaches ffmpeg exactly as it is.
+using Args = std::vector<std::string>;
+void run(const Args& args) {
+    if (platform::run_process(args) != 0) throw std::runtime_error("Command failed: " + platform::command_line(args));
+}
+std::string run_capture(const Args& args) {
     std::string output;
-    if (capture && read_pipe) { // drain while the child runs, so a large output cannot deadlock
-        std::array<char, 4096> buffer{};
-        for (DWORD read{}; ReadFile(read_pipe, buffer.data(), static_cast<DWORD>(buffer.size()), &read, nullptr) && read;)
-            output.append(buffer.data(), read);
-        CloseHandle(read_pipe);
-    }
-    WaitForSingleObject(process.hProcess, INFINITE);
-    GetExitCodeProcess(process.hProcess, &exit_code);
-    CloseHandle(process.hThread);
-    CloseHandle(process.hProcess);
-    return output;
-}
-void run(const std::wstring& command) {
-    DWORD exit_code{};
-    run_process(command, false, exit_code);
-    if (exit_code != 0) throw std::runtime_error("Command failed: " + narrow(command));
-}
-std::string run_capture(const std::wstring& command) {
-    DWORD exit_code{};
-    const auto output = run_process(command, true, exit_code);
-    if (exit_code != 0) throw std::runtime_error("Command failed: " + narrow(command));
+    if (platform::run_process(args, &output) != 0) throw std::runtime_error("Command failed: " + platform::command_line(args));
     return output;
 }
 
@@ -238,20 +179,15 @@ std::string trim(std::string text) {
 
 // Where scan and pack keep ffprobe's and ffmpeg's output.
 fs::path scratch_folder() {
-    wchar_t temp[MAX_PATH];
-    GetTempPathW(MAX_PATH, temp);
-    const auto scratch = fs::path(temp) / L"ReSkateMusicPacker";
+    const auto scratch = fs::temp_directory_path() / "ReSkateMusicPacker";
     fs::create_directories(scratch);
     return scratch;
 }
 
 // Where transcoded Opus files are cached so rebuilding doesn't re-encode unchanged songs.
 fs::path cache_folder() {
-    wchar_t local[MAX_PATH];
-    const auto len = GetEnvironmentVariableW(L"LOCALAPPDATA", local, MAX_PATH);
-    fs::path folder;
-    if (len > 0 && len < MAX_PATH) folder = fs::path(local) / L"ReSkateMusicPacker" / L"cache";
-    else folder = scratch_folder() / L"cache";
+    const auto base = platform::cache_directory();
+    const auto folder = base.empty() ? scratch_folder() / "cache" : base / "ReSkateMusicPacker" / "cache";
     std::error_code ec;
     fs::create_directories(folder, ec);
     return folder;
@@ -264,8 +200,8 @@ int attached_picture(const Json& root) {
                 return stream.at("index").get<int>();
     return -1;
 }
-constexpr wchar_t artwork_filter[] =
-    L"scale=512:512:force_original_aspect_ratio=decrease,pad=512:512:(ow-iw)/2:(oh-ih)/2:color=0x242035,setsar=1";
+constexpr char artwork_filter[] =
+    "scale=512:512:force_original_aspect_ratio=decrease,pad=512:512:(ow-iw)/2:(oh-ih)/2:color=0x242035,setsar=1";
 
 // ---- audio -------------------------------------------------------------------------------------
 
@@ -341,24 +277,24 @@ Opus read_ogg_opus(std::span<const std::byte> ogg) {
 constexpr char loudness_filter[] = "I=-15.0:TP=-1.5:LRA=11";
 constexpr char loudness_cache_tag[] = "_norm15";
 
-std::wstring loudness_af(const fs::path& file) {
+std::string loudness_af(const fs::path& file) {
     const auto base = std::string("loudnorm=") + loudness_filter;
     try {
-        const auto text = run_capture(L"ffmpeg -hide_banner -nostats -i \"" + file.wstring() +
-            L"\" -vn -map_metadata -1 -ac 2 -ar 48000 -af " + widen(base) + L":print_format=json -f null -");
+        const auto text = run_capture({"ffmpeg", "-hide_banner", "-nostats", "-i", path_utf8(file), "-vn", "-map_metadata", "-1",
+                                       "-ac", "2", "-ar", "48000", "-af", base + ":print_format=json", "-f", "null", "-"});
         const auto start = text.rfind('{'), end = text.rfind('}');
-        if (start == std::string::npos || end == std::string::npos || end < start) return widen(base);
+        if (start == std::string::npos || end == std::string::npos || end < start) return base;
         const auto root = Json::parse(text.substr(start, end - start + 1));
         const auto value = [&](const char* key) {
             return root.contains(key) && root.at(key).is_string() ? root.at(key).string() : std::string{};
         };
         const auto i = value("input_i"), lra = value("input_lra"), tp = value("input_tp");
         const auto thresh = value("input_thresh"), offset = value("target_offset");
-        if (i.empty() || tp.empty()) return widen(base);
-        return widen(base + ":measured_I=" + i + ":measured_LRA=" + lra + ":measured_TP=" + tp +
-                     ":measured_thresh=" + thresh + ":offset=" + offset + ":linear=true");
+        if (i.empty() || tp.empty()) return base;
+        return base + ":measured_I=" + i + ":measured_LRA=" + lra + ":measured_TP=" + tp +
+               ":measured_thresh=" + thresh + ":offset=" + offset + ":linear=true";
     } catch (const std::exception&) {
-        return widen(base); // measurement failed: fall back to the dynamic filter
+        return base; // measurement failed: fall back to the dynamic filter
     }
 }
 
@@ -382,11 +318,12 @@ EncodedOpus encode(const Song& song, int bitrate, bool normalize, const fs::path
         fs::remove(cachedFile, ec);
     }
 
-    const auto ogg = scratch / (widen(to_hex(fileSha)) + L"_" + std::to_wstring(bitrate) + L"k" + (normalize ? widen(loudness_cache_tag) : L"") + L".tmp.ogg");
-    const std::wstring af = normalize ? (L"-af " + loudness_af(song.file) + L" ") : L"";
-    run(L"ffmpeg -y -v error -i \"" + song.file.wstring() + L"\" -vn -map_metadata -1 -ac 2 -ar 48000 " +
-        af + L"-c:a libopus -b:a " + std::to_wstring(bitrate) + L"k -vbr on -frame_duration 20 "
-        L"-application audio -f ogg \"" + ogg.wstring() + L"\"");
+    const auto ogg = scratch / (to_hex(fileSha) + "_" + std::to_string(bitrate) + "k" + (normalize ? loudness_cache_tag : "") + ".tmp.ogg");
+    Args command{"ffmpeg", "-y", "-v", "error", "-i", path_utf8(song.file), "-vn", "-map_metadata", "-1", "-ac", "2", "-ar", "48000"};
+    if (normalize) command.insert(command.end(), {"-af", loudness_af(song.file)});
+    command.insert(command.end(), {"-c:a", "libopus", "-b:a", std::to_string(bitrate) + "k", "-vbr", "on", "-frame_duration", "20",
+                                   "-application", "audio", "-f", "ogg", path_utf8(ogg)});
+    run(command);
     auto opus = read_ogg_opus(read_file(ogg));
     for (const auto& packet : opus.packets)
         if (samples_in(packet) != packet_samples) throw std::runtime_error("ffmpeg produced a packet that is not 20 ms");
@@ -693,10 +630,7 @@ std::vector<std::byte> wave_resource(std::vector<std::byte> blob, const WaveFact
 // ---- the mod -----------------------------------------------------------------------------------
 
 std::string skate_sha256(const fs::path& game) {
-    const auto digest = hash(BCRYPT_SHA256_ALGORITHM, read_file(game / L"Skate.exe"), 32);
-    std::string text;
-    for (const auto b : digest) { char hex[3]; std::snprintf(hex, 3, "%02x", static_cast<unsigned>(b)); text += hex; }
-    return text;
+    return music::hex_digest(music::sha256_file(resolve_case(game / "Skate.exe")));
 }
 
 std::string json_string(const std::string& text) {
@@ -947,7 +881,7 @@ music::PackResult build(const music::PackOptions& options, const fs::path& out, 
     report(files.size(), "writing");
     write_file(out / cas_relative, cas);
     write_file(out / toc_path, tocBytes);
-    fs::copy_file(options.game / L"Data" / L"layout.toc", out / L"layout.toc", fs::copy_options::overwrite_existing);
+    fs::copy_file(resolve_case(options.game / "Data" / "layout.toc"), out / L"layout.toc", fs::copy_options::overwrite_existing);
     const auto text = [](const std::string& s) { return std::as_bytes(std::span(s.data(), s.size())); };
     write_file(out / L".reskate-studio-patch",
                text("ReSkate Studio native Patch v1\nskate_sha256=" + skate_sha256(options.game) + "\n"));
@@ -1108,9 +1042,8 @@ std::vector<std::byte> image_artwork_png(const fs::path& image) {
     std::error_code ignored;
     fs::remove(temporary, ignored);
     try {
-        run(L"ffmpeg -y -v error -i \"" + image.wstring() +
-            L"\" -an -vf \"" + artwork_filter + L"\" -frames:v 1 -update 1 \"" +
-            temporary.wstring() + L"\"");
+        run({"ffmpeg", "-y", "-v", "error", "-i", path_utf8(image), "-an", "-vf", artwork_filter,
+             "-frames:v", "1", "-update", "1", path_utf8(temporary)});
         auto bytes = read_file(temporary);
         fs::remove(temporary, ignored);
         return bytes;
@@ -1127,13 +1060,12 @@ fs::path embedded_artwork(const fs::path& track) {
             if (bytes.size() > 33 && std::memcmp(bytes.data(), "\x89PNG\r\n\x1a\n", 8) == 0) return cached;
         }
         const auto index = attached_picture(Json::parse(run_capture(
-            L"ffprobe -v error -select_streams v -show_entries stream=index:stream_disposition=attached_pic -of json \"" +
-            track.wstring() + L"\"")));
+            {"ffprobe", "-v", "error", "-select_streams", "v", "-show_entries", "stream=index:stream_disposition=attached_pic",
+             "-of", "json", path_utf8(track)})));
         if (index < 0) return {};
         temporary = cache_folder() / widen(key + ".tmp.png");
-        run(L"ffmpeg -y -v error -i \"" + track.wstring() + L"\" -map 0:" + std::to_wstring(index) +
-            L" -an -vf \"" + artwork_filter + L"\" -frames:v 1 -update 1 \"" +
-            temporary.wstring() + L"\"");
+        run({"ffmpeg", "-y", "-v", "error", "-i", path_utf8(track), "-map", "0:" + std::to_string(index), "-an", "-vf",
+             artwork_filter, "-frames:v", "1", "-update", "1", path_utf8(temporary)});
         std::error_code ignored;
         fs::remove(cached, ignored);
         fs::rename(temporary, cached);
@@ -1151,8 +1083,9 @@ std::vector<SongInfo> scan(std::span<const fs::path> files) {
         SongInfo song{file};
         try {
             const auto root = Json::parse(run_capture(
-                L"ffprobe -v error -show_entries format=duration:format_tags=artist,title:stream=index:stream_disposition=attached_pic -of json \"" +
-                file.wstring() + L"\""));
+                {"ffprobe", "-v", "error", "-show_entries",
+                 "format=duration:format_tags=artist,title:stream=index:stream_disposition=attached_pic", "-of", "json",
+                 path_utf8(file)}));
             song.has_embedded_artwork = attached_picture(root) >= 0;
             const auto& format = root.at("format");
             if (format.contains("duration") && format.at("duration").is_string()) song.seconds = std::atof(format.at("duration").string().c_str());
@@ -1421,11 +1354,10 @@ fs::path export_thunderstore(const fs::path& modFolder, const ThunderstoreOption
     if (!options.icon.empty() && fs::exists(options.icon)) {
         bool converted = false;
         try {
-            constexpr wchar_t icon_filter[] =
-                L"scale=256:256:force_original_aspect_ratio=decrease,pad=256:256:(ow-iw)/2:(oh-ih)/2:color=black@0,setsar=1";
-            run(L"ffmpeg -y -v error -i \"" + options.icon.wstring() +
-                L"\" -an -vf \"" + icon_filter + L"\" -frames:v 1 -update 1 \"" +
-                (staging / L"icon.png").wstring() + L"\"");
+            constexpr char icon_filter[] =
+                "scale=256:256:force_original_aspect_ratio=decrease,pad=256:256:(ow-iw)/2:(oh-ih)/2:color=black@0,setsar=1";
+            run({"ffmpeg", "-y", "-v", "error", "-i", path_utf8(options.icon), "-an", "-vf", icon_filter,
+                 "-frames:v", "1", "-update", "1", path_utf8(staging / "icon.png")});
             if (fs::is_regular_file(staging / L"icon.png") && fs::file_size(staging / L"icon.png") > 0) {
                 converted = true;
             }

@@ -28,3 +28,37 @@ jobs:
 
       - name: Test
         run: ctest --test-dir build -C Release --output-on-failure
+
+  # macOS and Linux: SDL2 GUI, ooz for Oodle blocks. Warnings are errors here as with MSVC.
+  build-test-posix:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-latest   # Apple Silicon
+          - os: ubuntu-24.04   # x86-64, GCC
+          - os: ubuntu-24.04
+            cxx: clang++
+            cc: clang
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install SDL2 and ffmpeg (macOS)
+        if: runner.os == 'macOS'
+        run: brew install sdl2 ffmpeg
+
+      - name: Install SDL2 and ffmpeg (Linux)
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y libsdl2-dev ffmpeg fonts-dejavu-core
+
+      - name: Configure
+        run: >
+          cmake -B build -DCMAKE_BUILD_TYPE=Release -DRSMP_WARNINGS_AS_ERRORS=ON
+          ${{ matrix.cxx && format('-DCMAKE_CXX_COMPILER={0} -DCMAKE_C_COMPILER={1}', matrix.cxx, matrix.cc) || '' }}
+
+      - name: Build
+        run: cmake --build build -j 4
+
+      - name: Test
+        run: ctest --test-dir build --output-on-failure --no-tests=error

@@ -1,6 +1,6 @@
 # ReSkate Music Packer
 
-A standalone Windows tool (GUI **and** CLI) that turns your audio files into add-only music mods for
+A standalone tool for Windows, macOS and Linux (GUI **and** CLI) that turns your audio files into add-only music mods for
 **skate.** running on [ReSkate](https://github.com/Dingo-Shenanigans/ReSkate). It adds new songs and
 custom playlists to the game's music without replacing any shipped files, so it survives game updates
 and stacks with other mods.
@@ -12,8 +12,8 @@ and stacks with other mods.
 
 ## Features
 
-- **Hybrid GUI & CLI** - double-click for a Dear ImGui DirectX 12 window, or script it from the
-  command line for batch packing.
+- **Hybrid GUI & CLI** - double-click for a Dear ImGui window (DirectX 12 on Windows, SDL2 on macOS
+  and Linux), or script it from the command line for batch packing.
 - **Add-only mods** - songs are added, never replacing the game's own tracks.
 - **Custom playlists** - group songs into named playlists that appear in the in-game music menu.
 - **Track & playlist artwork** - embedded album art is extracted automatically; pick your own image or
@@ -26,20 +26,26 @@ and stacks with other mods.
   don't collide with an existing song id.
 - **Thunderstore export** - one click to a Thunderstore-ready `.zip` (`manifest.json`, generated
   README/tracklist, 256x256 icon).
-- **One-click ffmpeg install** - if ffmpeg/ffprobe are missing, download a pinned static LGPL build
+- **One-click ffmpeg install (Windows)** - if ffmpeg/ffprobe are missing, download a pinned static LGPL build
   (BtbN/FFmpeg-Builds) into `.\ffmpeg` beside the app or `%LOCALAPPDATA%\ReSkateMusicPacker\ffmpeg`,
   verified against a SHA-256 before it is used.
-- **High-DPI aware** - per-monitor v2 DPI scaling.
+- **High-DPI aware** - per-monitor v2 DPI scaling on Windows, Retina on macOS, the desktop scale on Linux.
+- **Cross-platform** - on macOS and Linux the game's Oodle-compressed data is read with the
+  open-source [ooz](https://github.com/zao/ooz) decoder, so no Windows DLL is needed; there the
+  mod's archive is written uncompressed (a little larger, read the same way by the game).
 
 ## Requirements
 
-- Windows 10/11 (x64).
+- Windows 10/11 (x64), macOS 11+ (Apple Silicon or Intel), or a 64-bit Linux desktop (x86-64 or
+  ARM64). On macOS and Linux the game itself runs under Proton/Wine/CrossOver; point the packer at
+  that install folder.
 - **[ffmpeg](https://ffmpeg.org/) and ffprobe** on your `PATH`, or in a folder you point the GUI at. They do the decoding,
   Opus encoding, album-art extraction, and loudness measurement. If they're missing, the GUI's
   **Download ffmpeg automatically** button fetches a pinned static LGPL build for you (only when you
   click it). ffmpeg is only needed to *build* mods, not to play them in game.
-- **No installer and no Visual C++ redistributable.** The executable is self-contained (statically
-  linked) and uses only Windows system libraries.
+- **No installer and no Visual C++ redistributable** on Windows: the executable is self-contained
+  (statically linked) and uses only Windows system libraries. On macOS and Linux it needs SDL2
+  (`brew install sdl2 ffmpeg`, `sudo apt install libsdl2-2.0-0 ffmpeg`).
 - A **ReSkate runtime that reads `reskate-music.json`** (mod playlists). Cover art additionally needs
   the runtime's mod-artwork support.
 
@@ -91,7 +97,8 @@ the project/build files so the mod can be reopened and rebuilt. See
 
 ## Building
 
-Requires Visual Studio 2022 (v143) and CMake 3.20+. See [docs/building.md](docs/building.md).
+Windows: Visual Studio 2022 (v143) and CMake 3.20+. macOS/Linux: a C++20 compiler, CMake 3.20+
+and SDL2. See [docs/building.md](docs/building.md).
 
 ## License
 
