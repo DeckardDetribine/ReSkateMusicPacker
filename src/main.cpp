@@ -273,6 +273,10 @@ struct App {
     std::array<char, 64> new_playlist_input{};
     int new_playlist_row_target = -1;
 
+    enum class PendingAction { None, NewMod, OpenMod };
+    PendingAction pending_action = PendingAction::None;
+    bool show_confirm_discard_modal = false;
+
     std::map<std::string, ExternalSong> external_songs;
 } *g_app;
 
@@ -531,6 +535,27 @@ void add_files(App& app, const std::vector<fs::path>& paths, const std::string& 
             app.progress_text = narrow(files[i].filename().wstring());
         }
     });
+}
+
+void reset_mod(App& app) {
+    app.rows.clear();
+    app.output.clear();
+    app.active_playlist_filter.clear();
+    app.custom_playlists.clear();
+    app.select_playlist_tab.reset();
+    app.name.fill(0);
+    app.playlist.fill(0);
+    app.normalize = true;
+    app.playlist_artwork.clear();
+    app.generated_playlist_artwork.clear();
+    clear_artwork_preview(app);
+    set_status(app, "");
+}
+
+bool has_unsaved_changes(const App& app) {
+    return !app.rows.empty() || app.name[0] != '\0' || app.playlist[0] != '\0' ||
+           !app.custom_playlists.empty() || !app.playlist_artwork.empty() ||
+           !app.generated_playlist_artwork.empty();
 }
 
 void open_mod(App& app, const fs::path& folder) {
@@ -948,23 +973,22 @@ void songs_page(App& app, HWND window) {
 
         ImGui::BeginDisabled(busy);
         if (ImGui::Button("New Mod", ImVec2(new_btn_w, 0))) {
-            app.rows.clear();
-            app.output.clear();
-            app.active_playlist_filter.clear();
-            app.custom_playlists.clear();
-            app.select_playlist_tab.reset();
-            app.name.fill(0);
-            app.playlist.fill(0);
-            app.normalize = true;
-            app.playlist_artwork.clear();
-            app.generated_playlist_artwork.clear();
-            clear_artwork_preview(app);
-            set_status(app, "");
+            if (has_unsaved_changes(app)) {
+                app.pending_action = App::PendingAction::NewMod;
+                app.show_confirm_discard_modal = true;
+            } else {
+                reset_mod(app);
+            }
         }
         ImGui::SameLine();
         if (ImGui::Button("Open Mod...", ImVec2(open_btn_w, 0))) {
-            const auto folders = pick(window, true);
-            if (!folders.empty()) open_mod(app, folders[0]);
+            if (has_unsaved_changes(app)) {
+                app.pending_action = App::PendingAction::OpenMod;
+                app.show_confirm_discard_modal = true;
+            } else {
+                const auto folders = pick(window, true);
+                if (!folders.empty()) open_mod(app, folders[0]);
+            }
         }
         ImGui::SameLine(0, group_gap);
         ImGui::SetNextItemWidth(name_input_w);
@@ -1233,6 +1257,37 @@ void songs_page(App& app, HWND window) {
         ImGui::SameLine();
         if (ImGui::Button("Cancel", ImVec2(S(80), 0)) || ImGui::IsKeyPressed(ImGuiKey_Escape)) {
             app.new_playlist_row_target = -1;
+            ImGui::CloseCurrentPopup();
+        }
+        ImGui::EndPopup();
+    }
+
+    if (app.show_confirm_discard_modal) {
+        ImGui::OpenPopup("Discard Changes?");
+        app.show_confirm_discard_modal = false;
+    }
+    if (ImGui::BeginPopupModal("Discard Changes?", nullptr, ImGuiWindowFlags_AlwaysAutoResize)) {
+        ImGui::PushTextWrapPos(ImGui::GetCursorPosX() + S(380));
+        ImGui::TextWrapped("You have songs or metadata loaded. Starting a new mod or opening another will discard your current progress.");
+        ImGui::PopTextWrapPos();
+        ImGui::Spacing();
+        ImGui::Separator();
+        ImGui::Spacing();
+
+        if (ImGui::Button("Discard and Continue", ImVec2(S(160), 0))) {
+            const auto action = app.pending_action;
+            app.pending_action = App::PendingAction::None;
+            ImGui::CloseCurrentPopup();
+            if (action == App::PendingAction::NewMod) {
+                reset_mod(app);
+            } else if (action == App::PendingAction::OpenMod) {
+                const auto folders = pick(window, true);
+                if (!folders.empty()) open_mod(app, folders[0]);
+            }
+        }
+        ImGui::SameLine();
+        if (ImGui::Button("Cancel", ImVec2(S(80), 0)) || ImGui::IsKeyPressed(ImGuiKey_Escape)) {
+            app.pending_action = App::PendingAction::None;
             ImGui::CloseCurrentPopup();
         }
         ImGui::EndPopup();
