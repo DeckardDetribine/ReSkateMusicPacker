@@ -274,8 +274,12 @@ void clear_artwork_preview(App& app) {
     app.artwork_preview_error.clear();
 }
 
+// The game's Mods folder as the disk spells it, so a "mods" folder on a case-sensitive disk is not
+// shadowed by a second "Mods" that Wine would then see twice.
+fs::path mods_folder(const App& app) { return dingosdk::resolve_case(app.settings.game / L"Mods"); }
+
 fs::path output_folder(const App& app) {
-    return !app.output.empty() ? app.output : app.settings.game / L"Mods" / folder_name(app.name.data());
+    return !app.output.empty() ? app.output : mods_folder(app) / folder_name(app.name.data());
 }
 
 // Scans other installed mods in Mods/ and the game's content cache for existing songs to warn on clash.
@@ -284,9 +288,9 @@ void refresh_external_songs(App& app) {
     if (!game_folder(app.settings.game)) return;
 
     std::error_code ec;
-    const auto mods_folder = app.settings.game / L"Mods";
-    if (fs::exists(mods_folder, ec) && fs::is_directory(mods_folder, ec)) {
-        for (const auto& entry : fs::directory_iterator(mods_folder, ec)) {
+    const auto mods = mods_folder(app);
+    if (fs::exists(mods, ec) && fs::is_directory(mods, ec)) {
+        for (const auto& entry : fs::directory_iterator(mods, ec)) {
             if (!entry.is_directory(ec)) continue;
             const auto mod_path = entry.path();
             const auto mod_name = narrow(mod_path.filename().wstring());
@@ -985,7 +989,7 @@ void songs_page(App& app, NativeWindow window) {
         ImGui::SameLine(0, group_gap);
         ImGui::SetNextItemWidth(name_input_w);
         if (ImGui::InputTextWithHint("##name", "Mod name", app.name.data(), app.name.size()) && !app.output.empty() &&
-            app.output.parent_path() == app.settings.game / L"Mods")
+            app.output.parent_path() == mods_folder(app))
             app.output.clear(); // a renamed new mod goes to its new folder; an opened one stays where it is
         if (ImGui::IsItemHovered()) ImGui::SetTooltip("Mod name (used for the mod folder in Mods/)");
 

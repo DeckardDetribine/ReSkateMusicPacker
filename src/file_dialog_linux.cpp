@@ -5,6 +5,8 @@
 
 #include <SDL.h>
 
+#include <chrono>
+#include <future>
 #include <sstream>
 #include <string>
 
@@ -35,8 +37,20 @@ std::vector<fs::path> pick(SDL_Window* owner, bool folder, bool image) {
                                  "window instead.", owner);
         return {};
     }
-    std::string output;
-    if (platform::run_process(args, &output) != 0) return {}; // cancelled
+    // The dialog is another process, so waiting on it would stop this window answering the
+    // compositor, which then shows it as hung. Keep pumping events meanwhile, and drop keys and
+    // clicks aimed at the window behind the dialog, as a modal dialog would.
+    auto dialog = std::async(std::launch::async, [&args] {
+        std::string output;
+        const int code = platform::run_process(args, &output);
+        return std::pair{code, output};
+    });
+    while (dialog.wait_for(std::chrono::milliseconds(20)) == std::future_status::timeout) {
+        SDL_PumpEvents();
+        SDL_FlushEvents(SDL_KEYDOWN, SDL_MOUSEWHEEL);
+    }
+    const auto [code, output] = dialog.get();
+    if (code != 0) return {}; // cancelled
     std::vector<fs::path> result;
     std::istringstream lines(output);
     for (std::string line; std::getline(lines, line);)

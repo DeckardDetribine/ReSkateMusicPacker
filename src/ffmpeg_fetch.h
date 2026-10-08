@@ -3,7 +3,8 @@
 // Fetches and installs ffmpeg.exe + ffprobe.exe when they are missing. The download is Windows-only
 // (WinHTTP, the system proxy, and a pinned win64 build); elsewhere ffmpeg comes from the package
 // manager, and only the local-file path, the SHA-256 check and the extraction work. The pinned
-// archive is verified with SHA-256 before anything is extracted. Nothing here runs on its own; the GUI and CLI call it after an explicit click.
+// archive is verified with SHA-256 before anything is extracted. Nothing here runs on its own; the
+// GUI and CLI call it after an explicit click.
 #pragma once
 #include "packer.h"
 #include <atomic>
@@ -54,8 +55,9 @@ void extract_zip_member(const std::filesystem::path& archive, const std::string&
                         const std::filesystem::path& dest);
 
 // Downloads `url`, verifies its SHA-256 and extracts ffmpeg.exe + ffprobe.exe into `install_dir`,
-// returning that folder. The members are bin/ffmpeg and bin/ffprobe plus platform::executable_suffix. The URL and hash are parameters so the core has no hidden network use and
-// tests can pass a local fixture.
+// returning that folder. The members are bin/ffmpeg and bin/ffprobe plus platform::executable_suffix.
+// The URL and hash are parameters so the core has no hidden network use and tests can pass a local
+// fixture.
 std::filesystem::path ensure_ffmpeg(const std::filesystem::path& install_dir,
                                     const std::string& url = ffmpeg_url(),
                                     const std::string& sha256 = ffmpeg_sha256(),

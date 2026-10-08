@@ -8,6 +8,7 @@
 #include <shlobj.h>
 #include <tlhelp32.h>
 
+#include <algorithm>
 #include <array>
 
 namespace platform {
@@ -121,7 +122,13 @@ void add_to_path(const fs::path& folder) {
     if (folder.empty()) return;
     std::wstring path(GetEnvironmentVariableW(L"PATH", nullptr, 0), L'\0');
     path.resize(GetEnvironmentVariableW(L"PATH", path.data(), static_cast<DWORD>(path.size())));
-    if (path.find(folder.wstring()) == std::wstring::npos) SetEnvironmentVariableW(L"PATH", (folder.wstring() + L";" + path).c_str());
+    // Whole entries only: C:\ffmpeg is not already there just because C:\ffmpeg\bin is.
+    for (std::size_t start = 0; start <= path.size();) {
+        const auto end = std::min(path.find(L';', start), path.size());
+        if (_wcsicmp(path.substr(start, end - start).c_str(), folder.c_str()) == 0) return;
+        start = end + 1;
+    }
+    SetEnvironmentVariableW(L"PATH", (folder.wstring() + L";" + path).c_str());
 }
 
 bool on_path(const std::string& name) {

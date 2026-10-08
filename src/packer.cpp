@@ -179,7 +179,14 @@ std::string trim(std::string text) {
 
 // Where scan and pack keep ffprobe's and ffmpeg's output.
 fs::path scratch_folder() {
+#ifdef _WIN32
     const auto scratch = fs::temp_directory_path() / "ReSkateMusicPacker";
+#else
+    // /tmp is shared by every user, so another account could own the folder or plant symlinks at
+    // the predictable names ffmpeg overwrites (-y); the user's own cache folder is private.
+    const auto base = platform::cache_directory();
+    const auto scratch = (base.empty() ? fs::temp_directory_path() : base) / "ReSkateMusicPacker" / "scratch";
+#endif
     fs::create_directories(scratch);
     return scratch;
 }

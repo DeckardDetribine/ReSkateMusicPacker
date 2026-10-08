@@ -76,6 +76,9 @@ if(NOT WIN32)
     target_include_directories(ooz SYSTEM PRIVATE External/ooz External/ooz/simde)
     target_compile_definitions(ooz PRIVATE OOZ_BUILD_DLL=1)
     target_compile_options(ooz PRIVATE -w) # third-party code, built as upstream ships it
+    # ooz adds negative offsets held in size_t to pointers; Clang 22 at -O2 miscompiles Leviathan
+    # without wrapping pointer arithmetic.
+    target_compile_options(ooz PRIVATE -fno-strict-overflow)
     set_target_properties(ooz PROPERTIES CXX_STANDARD 17)
 endif()
 
