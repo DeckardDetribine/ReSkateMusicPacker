@@ -2,10 +2,12 @@
 
 ## ffmpeg / ffprobe not found
 
-The packer needs both `ffmpeg.exe` and `ffprobe.exe`. Put them on your `PATH`, or point the GUI's
-ffmpeg field at the folder that contains them. A full ffmpeg build includes both.
+The packer needs both `ffmpeg` and `ffprobe` (`.exe` on Windows). Put them on your `PATH`, or point
+the GUI's ffmpeg field at the folder that contains them. A full ffmpeg build includes both. On macOS
+the app also looks in Homebrew's and MacPorts' folders, which an app opened from Finder does not
+otherwise see.
 
-If you'd rather not install it yourself, the **Download ffmpeg automatically** button (first-run setup
+If you'd rather not install it yourself on Windows, the **Download ffmpeg automatically** button (first-run setup
 or **Settings...**) fetches a pinned static LGPL build from
 [BtbN/FFmpeg-Builds](https://github.com/BtbN/FFmpeg-Builds) into `.\ffmpeg` beside the app when that
 folder is writable, otherwise `%LOCALAPPDATA%\ReSkateMusicPacker\ffmpeg`.
@@ -64,6 +66,21 @@ generated `README.md` tracklist and a 256x256 `icon.png`.
 
 ## Where the files live
 
-- Settings: `%APPDATA%\ReSkateMusicPacker\settings.json`
-- Encode cache: `%LOCALAPPDATA%\ReSkateMusicPacker\cache\` (delete to force a full re-encode)
-- Downloaded ffmpeg: `.\ffmpeg` beside the app (portable) or `%LOCALAPPDATA%\ReSkateMusicPacker\ffmpeg`
+| | Windows | macOS | Linux |
+|---|---|---|---|
+| Settings | `%APPDATA%\ReSkateMusicPacker\settings.json` | `~/Library/Application Support/ReSkateMusicPacker/settings.json` | `$XDG_CONFIG_HOME` or `~/.config/ReSkateMusicPacker/settings.json` |
+| Encode cache (delete to force a full re-encode) | `%LOCALAPPDATA%\ReSkateMusicPacker\cache\` | `~/Library/Caches/ReSkateMusicPacker/cache/` | `$XDG_CACHE_HOME` or `~/.cache/ReSkateMusicPacker/cache/` |
+| Downloaded ffmpeg | `.\ffmpeg` beside the app (portable) or `%LOCALAPPDATA%\ReSkateMusicPacker\ffmpeg` | - | - |
+
+## macOS and Linux notes
+
+- **"No file dialog was found" (Linux)**: install `zenity` or `kdialog`, or drag files and folders
+  onto the window.
+- **Clash warnings miss the game soundtrack**: the soundtrack list comes from ReSkate's content cache.
+  Off Windows it is looked for inside the Wine/Proton prefix (`drive_c/users/*/AppData/Local/ReSkate/cache`)
+  of the game folder you chose; a game folder outside a prefix has none to check.
+- **Mods are a little larger than on Windows**: there is no Oodle encoder outside Windows, so the
+  mod's archive is stored uncompressed, which the game reads like its own uncompressed blocks. The
+  game's own data is still read through the open-source ooz decoder.
+- **Lowercase folders on Linux**: the game spells its paths the Windows way (`Data/Win32/...`); on a
+  case-sensitive file system the packer matches them regardless of case.

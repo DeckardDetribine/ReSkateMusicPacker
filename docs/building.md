@@ -2,11 +2,18 @@
 
 ## Prerequisites
 
-- **Visual Studio 2022** with the **Desktop development with C++** workload (v143 toolset).
-- **CMake 3.20+**.
-- No other downloads: Dear ImGui, zstd, LZ4, miniz and RapidJSON are vendored under `External/`.
+- **Windows**: **Visual Studio 2022** with the **Desktop development with C++** workload (v143 toolset).
+- **macOS**: Xcode command line tools (Apple Clang) and Homebrew's `sdl2` (`brew install sdl2 ffmpeg`).
+- **Linux**: GCC 12+ or Clang 16+, and SDL2's development package (`sudo apt install build-essential
+  cmake libsdl2-dev ffmpeg fonts-dejavu-core`, `sudo dnf install gcc-c++ cmake SDL2-devel ffmpeg
+  dejavu-sans-fonts`, ...). The generated text cover needs a bold DejaVu, Liberation or Noto Sans
+  font, which most desktops already have. The file pickers use `zenity` or `kdialog` when present;
+  dragging files onto the window always works.
+- **CMake 3.20+** everywhere.
+- Everything else is vendored under `External/`: Dear ImGui, zstd, LZ4, miniz and RapidJSON, plus,
+  for macOS/Linux, ooz (Oodle decoder) with a slice of SIMD Everywhere, and stb_image.
 
-## Build
+## Build on Windows
 
 From the repository root:
 
@@ -19,6 +26,24 @@ Outputs land in `build/vs2022-x64/Release/`:
 
 - `ReSkateMusicPacker.exe` - the unified GUI & CLI application.
 - `ReSkateMusicPackerTests.exe` - the regression tests.
+
+## Build on macOS and Linux
+
+```sh
+cmake -B build -DCMAKE_BUILD_TYPE=Release
+cmake --build build -j
+```
+
+- macOS: `build/ReSkateMusicPacker.app` (the CLI is `build/ReSkateMusicPacker.app/Contents/MacOS/ReSkateMusicPacker`).
+- Linux: `build/ReSkateMusicPacker`.
+- `-DRSMP_WARNINGS_AS_ERRORS=ON` makes warnings errors, as CI builds do (MSVC builds always do).
+
+```sh
+ctest --test-dir build --output-on-failure
+```
+
+The extra `cas_codec_tests` check the Oodle path there: Kraken, Selkie and Leviathan blocks (made
+from this repository's `LICENSE`, in `test/fixtures/`) decode through `decode_cas()` and ooz.
 
 ## Tests
 
@@ -33,11 +58,14 @@ ffmpeg/ffprobe on `PATH`.
 
 ```
 src/
-  main.cpp            # GUI (Dear ImGui/DX12) and the CLI entry point
+  main.cpp            # GUI (Dear ImGui) and the CLI entry point; Win32 window or SDL2 window
   packer.cpp/.h       # the library: scan, encode, build the mod, Thunderstore export
-  artwork.cpp         # cover image extraction/scaling and the generated text cover
+  artwork_*.cpp       # the generated text cover: GDI+WIC (win32) or stb_truetype+miniz (posix)
+  platform*.{h,cpp}   # processes, PATH, per-user folders, opening URLs/folders, per OS
+  file_dialog*        # the open dialog: Explorer, NSOpenPanel (mac .mm) or zenity/kdialog (linux)
+  sha.cpp/.h          # SHA-1 / SHA-256
   Engine/              # Frostbite RES/EBX/TOC/cas readers, writer, and bundle handling
-  gui_renderer.*      # the DirectX 12 renderer for the GUI
+  gui_renderer*       # the GUI renderer: Direct3D 12 (win32) or SDL_Renderer (sdl)
 External/             # vendored third-party libraries
 test/                 # tests
 ```

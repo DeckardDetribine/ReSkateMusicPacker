@@ -1,11 +1,11 @@
 // SPDX-FileCopyrightText: 2026 DeckardDetribine and the ReSkateMusicPacker contributors
 // SPDX-License-Identifier: GPL-3.0-only
 // The music packer library end to end: two generated tones in, a mod folder out. Needs ffmpeg
-// on PATH and a game folder (argv[1], default F:\Games\ReSkate-1.0.0); without the game it skips.
+// on PATH and a game folder (argv[1], default F:\Games\ReSkate-1.0.0 on Windows); without the game it skips.
 #include "packer.h"
 #include "ffmpeg_fetch.h"
 #include "Engine/Core/Json/json.h"
-#include <Windows.h>
+#include "platform.h"
 #include <cctype>
 #include <cstdio>
 #include <atomic>
@@ -28,15 +28,19 @@ std::string slurp(const fs::path& path) {
     text << in.rdbuf();
     return text.str();
 }
+std::string arg(const fs::path& path) { return platform::narrow(path.wstring()); }
+// Runs a fixture command; any failure ends the test run.
+void fixture(const std::vector<std::string>& args, const char* what) {
+    if (platform::run_process(args) != 0) { std::printf("FAIL: %s\n", what); std::exit(1); }
+}
 void tone(const fs::path& file, int hertz, const char* artist, const char* title) {
-    const auto command = L"ffmpeg -y -v error -f lavfi -i sine=frequency=" + std::to_wstring(hertz) +
-                         L":duration=3 -metadata artist=\"" + std::wstring(artist, artist + strlen(artist)) +
-                         L"\" -metadata title=\"" + std::wstring(title, title + strlen(title)) + L"\" \"" + file.wstring() + L"\"";
-    if (_wsystem((L"\"" + command + L"\"").c_str()) != 0) { std::printf("FAIL: ffmpeg\n"); std::exit(1); }
+    fixture({"ffmpeg", "-y", "-v", "error", "-f", "lavfi", "-i", "sine=frequency=" + std::to_string(hertz) + ":duration=3",
+             "-metadata", std::string("artist=") + artist, "-metadata", std::string("title=") + title, arg(file)}, "ffmpeg");
 }
 } // namespace
 
-int wmain(int argc, wchar_t** argv) {
+int run_tests(const std::vector<fs::path>& argv) {
+    const auto argc = argv.size();
     { // Slug derivation is pure, so the collision and sanitization rules are checked first.
         const auto lower = [](std::string text) {
             for (auto& c : text) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
@@ -62,7 +66,7 @@ int wmain(int argc, wchar_t** argv) {
     }
 
     const fs::path game = argc > 1 ? argv[1] : L"F:/Games/ReSkate-1.0.0";
-    if (!fs::exists(game / L"Skate.exe")) { std::printf("SKIP: no game at %ls\n", game.c_str()); return 0; }
+    if (!fs::exists(game / L"Skate.exe")) { std::printf("SKIP: no game at %s\n", arg(game).c_str()); return 0; }
 
     const auto root = fs::temp_directory_path() / L"ReSkateMusicPackerTest";
     fs::remove_all(root);
@@ -82,8 +86,8 @@ int wmain(int argc, wchar_t** argv) {
 
     songs[1].playlist = "Second Station";
     const auto cover = root / L"cover image.png";
-    const auto coverCommand = L"ffmpeg -y -v error -f lavfi -i color=c=red:s=320x180 -frames:v 1 -update 1 \"" + cover.wstring() + L"\"";
-    if (_wsystem((L"\"" + coverCommand + L"\"").c_str()) != 0) { std::printf("FAIL: artwork fixture\n"); return 1; }
+    fixture({"ffmpeg", "-y", "-v", "error", "-f", "lavfi", "-i", "color=c=red:s=320x180", "-frames:v", "1", "-update", "1",
+             arg(cover)}, "artwork fixture");
     const auto embeddedFile = root / L"embedded cover.png";
     const auto embeddedPng = music::playlist_artwork_png("Embedded Album");
     {
@@ -91,9 +95,8 @@ int wmain(int argc, wchar_t** argv) {
         out.write(reinterpret_cast<const char*>(embeddedPng.data()), static_cast<std::streamsize>(embeddedPng.size()));
     }
     const auto tagged = root / L"tagged.mp3";
-    const auto attachCommand = L"ffmpeg -y -v error -i \"" + files[0].wstring() + L"\" -i \"" + embeddedFile.wstring() +
-        L"\" -map 0:a -map 1:v -c copy -disposition:v attached_pic \"" + tagged.wstring() + L"\"";
-    if (_wsystem((L"\"" + attachCommand + L"\"").c_str()) != 0) { std::printf("FAIL: attached artwork fixture\n"); return 1; }
+    fixture({"ffmpeg", "-y", "-v", "error", "-i", arg(files[0]), "-i", arg(embeddedFile), "-map", "0:a", "-map", "1:v",
+             "-c", "copy", "-disposition:v", "attached_pic", arg(tagged)}, "attached artwork fixture");
     fs::remove(files[0]);
     fs::rename(tagged, files[0]);
     songs[0].artwork = cover;
@@ -249,3 +252,9 @@ int wmain(int argc, wchar_t** argv) {
     std::printf(failures ? "%d failure(s)\n" : "all passed\n", failures);
     return failures ? 1 : 0;
 }
+
+#ifdef _WIN32
+int wmain(int argc, wchar_t** argv) { return run_tests({argv, argv + argc}); }
+#else
+int main(int argc, char** argv) { return run_tests({argv, argv + argc}); }
+#endif

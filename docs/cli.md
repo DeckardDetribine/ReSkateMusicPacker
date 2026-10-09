@@ -64,7 +64,7 @@ ReSkateMusicPacker.exe --get-ffmpeg
 ReSkateMusicPacker.exe --get-ffmpeg "C:\Tools\ffmpeg"
 ```
 
-`--get-ffmpeg` downloads the same pinned static LGPL build (BtbN/FFmpeg-Builds) the GUI button uses,
+`--get-ffmpeg` (Windows only) downloads the same pinned static LGPL build (BtbN/FFmpeg-Builds) the GUI button uses,
 verifies its SHA-256, extracts `ffmpeg.exe` + `ffprobe.exe` and prints the folder. With no folder it
 installs beside the exe when writable, else under `%LOCALAPPDATA%\ReSkateMusicPacker\ffmpeg`.
 `FFMPEG_URL` and `FFMPEG_SHA256` override the pinned source.
@@ -72,7 +72,8 @@ installs beside the exe when writable, else under `%LOCALAPPDATA%\ReSkateMusicPa
 ## Caching
 
 Encoded Opus is cached by source-file hash and settings in
-`%LOCALAPPDATA%\ReSkateMusicPacker\cache\`, so rebuilding only re-encodes what changed. Deleting that
+`%LOCALAPPDATA%\ReSkateMusicPacker\cache\` (see [where the files live](troubleshooting.md#where-the-files-live)
+for macOS and Linux), so rebuilding only re-encodes what changed. Deleting that
 folder forces a full re-encode.
 
 ## Thunderstore

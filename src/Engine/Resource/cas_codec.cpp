@@ -17,6 +17,11 @@
 #include "miniz.h"
 #include "zstd.h"
 
+#ifndef _WIN32
+// External/ooz/kraken.cpp: Kraken, Mermaid, Selkie and Leviathan. Writes up to 64 bytes past dst_len.
+int Kraken_Decompress(const std::uint8_t* src, std::size_t src_len, std::uint8_t* dst, std::size_t dst_len);
+#endif
+
 namespace dingosdk::frostbite {
 namespace {
 
@@ -86,15 +91,8 @@ template <typename Function> Function oodle_function(const std::filesystem::path
     return reinterpret_cast<Function>(address);
 }
 #else
-// Linux dedicated servers read pre-exported world-layers.json; Oodle blocks
-// (game CAS) need the Windows game + oo2core DLL and are unsupported here.
-[[maybe_unused]] void *oodle(const std::filesystem::path &) {
-    throw std::runtime_error("Oodle CAS data is only supported on Windows (export world-layers.json there)");
-}
-template <typename Function> Function oodle_function(const std::filesystem::path&, const char* name) {
-    (void)name;
-    throw std::runtime_error("Oodle CAS data is only supported on Windows");
-}
+// Off Windows there is no oo2core to load: blocks are read with the open-source ooz decoder
+// (External/ooz) and written raw, which the game reads like its own incompressible blocks.
 #endif
 
 std::vector<std::byte> zlib_decode(std::span<const std::byte> input, std::size_t size) {
@@ -142,10 +140,14 @@ std::vector<std::byte> oodle_decode(std::span<const std::byte> input, std::size_
         throw std::runtime_error("Oodle CAS block failed to decode");
     return output;
 #else
-    (void)input;
-    (void)size;
     (void)gameRoot;
-    throw std::runtime_error("Oodle CAS data is only supported on Windows (export world-layers.json there)");
+    constexpr std::size_t safe_space = 64;
+    std::vector<std::byte> output(size + safe_space);
+    if (Kraken_Decompress(reinterpret_cast<const std::uint8_t*>(input.data()), input.size(),
+                          reinterpret_cast<std::uint8_t*>(output.data()), size) != static_cast<int>(size))
+        throw std::runtime_error("Oodle CAS block failed to decode");
+    output.resize(size);
+    return output;
 #endif
 }
 
@@ -173,11 +175,11 @@ std::vector<std::byte> oodle_encode(std::span<const std::byte> input, CasCompres
     output.resize(static_cast<std::size_t>(length));
     return output;
 #else
-    (void)input;
+    // No Oodle encoder here: hand the block back as is, so encode_cas() stores it raw.
     (void)compression;
     (void)level;
     (void)gameRoot;
-    throw std::runtime_error("Oodle CAS data is only supported on Windows");
+    return {input.begin(), input.end()};
 #endif
 }
 
