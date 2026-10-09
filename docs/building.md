@@ -5,8 +5,10 @@
 - **Windows**: **Visual Studio 2022** with the **Desktop development with C++** workload (v143 toolset).
 - **macOS**: Xcode command line tools (Apple Clang) and Homebrew's `sdl2` (`brew install sdl2 ffmpeg`).
 - **Linux**: GCC 12+ or Clang 16+, and SDL2's development package (`sudo apt install build-essential
-  cmake libsdl2-dev ffmpeg`, `sudo dnf install gcc-c++ cmake SDL2-devel ffmpeg`, ...). The file
-  pickers use `zenity` or `kdialog` when present; dragging files onto the window always works.
+  cmake libsdl2-dev ffmpeg fonts-dejavu-core`, `sudo dnf install gcc-c++ cmake SDL2-devel ffmpeg
+  dejavu-sans-fonts`, ...). The generated text cover needs a bold DejaVu, Liberation or Noto Sans
+  font, which most desktops already have. The file pickers use `zenity` or `kdialog` when present;
+  dragging files onto the window always works.
 - **CMake 3.20+** everywhere.
 - Everything else is vendored under `External/`: Dear ImGui, zstd, LZ4, miniz and RapidJSON, plus,
   for macOS/Linux, ooz (Oodle decoder) with a slice of SIMD Everywhere, and stb_image.
