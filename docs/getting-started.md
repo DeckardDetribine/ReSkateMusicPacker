@@ -2,14 +2,18 @@
 
 ## What you need
 
-- **Windows 10/11 (x64).**
+- **Windows 10/11 (x64)**, **macOS 11+** or a **64-bit Linux desktop**. On macOS and Linux, skate.
+  runs under Proton, Wine or CrossOver; the packer only needs to read its install folder.
 - **ffmpeg and ffprobe** on your `PATH`, or in a folder you point the tool at. They handle decoding,
   Opus encoding, album-art extraction, and loudness measurement. Get them from
-  [ffmpeg.org](https://ffmpeg.org/download.html) (a full build includes both binaries).
+  [ffmpeg.org](https://ffmpeg.org/download.html) (a full build includes both binaries), or on macOS
+  `brew install ffmpeg`, on Linux your package manager (`sudo apt install ffmpeg`, ...).
 - A **ReSkate runtime** that reads `reskate-music.json` (mod playlists). Artwork needs the runtime's
   mod-artwork support as well.
 - Your **game folder**: the ReSkate install containing `Skate.exe` (e.g. `F:\Games\ReSkate-1.0.0`).
-  The packer reads the game's audio templates from it.
+  The packer reads the game's audio templates from it. Under Steam/Proton that is
+  `~/.local/share/Steam/steamapps/common/<game>`; in a Wine or CrossOver bottle, the folder inside
+  its `drive_c`.
 
 ## Building the packer
 
@@ -17,7 +21,8 @@ If you don't have a release build, see [Building from source](building.md).
 
 ## The GUI
 
-Run `ReSkateMusicPacker.exe` with no arguments, or double-click it.
+Run `ReSkateMusicPacker.exe` (Windows), `ReSkateMusicPacker.app` (macOS) or `ReSkateMusicPacker`
+(Linux) with no arguments, or double-click it.
 
 1. **Game folder** - point it at the install with `Skate.exe`. The tool checks for the file.
 2. **ffmpeg** - if ffmpeg/ffprobe aren't on `PATH`, point this at the folder containing them, or click
@@ -25,7 +30,9 @@ Run `ReSkateMusicPacker.exe` with no arguments, or double-click it.
    [BtbN/FFmpeg-Builds](https://github.com/BtbN/FFmpeg-Builds)) into `.\ffmpeg` beside the app when
    that folder is writable, otherwise `%LOCALAPPDATA%\ReSkateMusicPacker\ffmpeg`. The download only
    starts from the click, and the archive is checked against a pinned SHA-256 before anything is
-   extracted. Both settings are remembered in `%APPDATA%\ReSkateMusicPacker\settings.json`.
+   extracted. The automatic download is Windows-only; on macOS and Linux install ffmpeg with your
+   package manager and press **Check again**. Both settings are remembered in the settings file (see
+   [where the files live](troubleshooting.md#where-the-files-live)).
 3. **Add songs** - drag files or a folder onto the window, or use the picker. Each song shows its
    artist/title (from tags, else the file name) and an artwork thumbnail.
 4. **Name and playlist** - give the mod a name and the playlist it should appear under in the in-game

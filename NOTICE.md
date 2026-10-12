@@ -26,6 +26,12 @@ license, and their license files are kept beside them in the tree and should shi
 | LZ4 | `External/lz4` | BSD 2-Clause |
 | Zstandard (zstd) | `External/zstd` | BSD 3-Clause (or GPL-2.0) |
 | miniz | `External/miniz` | MIT / public domain |
+| ooz (decoder only; macOS/Linux builds) | `External/ooz` | GPL-3.0-or-later |
+| SIMD Everywhere (subset, used by ooz) | `External/ooz/simde` | MIT |
+| stb_image (macOS/Linux builds) | `External/stb` | MIT / public domain |
+
+The Dear ImGui SDL2 backends (`External/imgui/backends/imgui_impl_sdl2*`, `imgui_impl_sdlrenderer2*`)
+are part of Dear ImGui (MIT). macOS and Linux builds link SDL2 (zlib license) from the system.
 
 ## Game content
 

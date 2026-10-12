@@ -1,8 +1,10 @@
 // SPDX-FileCopyrightText: 2026 DeckardDetribine and the ReSkateMusicPacker contributors
 // SPDX-License-Identifier: GPL-3.0-only
-// Fetches and installs ffmpeg.exe + ffprobe.exe when they are missing. Windows-only: the download
-// goes through WinHTTP (the system proxy), and the pinned archive is verified with SHA-256 before
-// anything is extracted. Nothing here runs on its own; the GUI and CLI call it after an explicit click.
+// Fetches and installs ffmpeg.exe + ffprobe.exe when they are missing. The download is Windows-only
+// (WinHTTP, the system proxy, and a pinned win64 build); elsewhere ffmpeg comes from the package
+// manager, and only the local-file path, the SHA-256 check and the extraction work. The pinned
+// archive is verified with SHA-256 before anything is extracted. Nothing here runs on its own; the
+// GUI and CLI call it after an explicit click.
 #pragma once
 #include "packer.h"
 #include <atomic>
@@ -17,6 +19,9 @@ namespace music {
 struct DownloadProgress {
     std::uint64_t received{}, total{};
 };
+
+// Whether download_to_file can fetch http(s) URLs here, so the GUI offers the one-click install.
+bool ffmpeg_download_supported();
 
 // The pinned build: a dated, static, LGPL win64 asset from BtbN/FFmpeg-Builds that ships ffmpeg,
 // ffprobe and libopus. FFMPEG_URL and FFMPEG_SHA256 (environment variables) override both, so link
@@ -50,8 +55,9 @@ void extract_zip_member(const std::filesystem::path& archive, const std::string&
                         const std::filesystem::path& dest);
 
 // Downloads `url`, verifies its SHA-256 and extracts ffmpeg.exe + ffprobe.exe into `install_dir`,
-// returning that folder. The URL and hash are parameters so the core has no hidden network use and
-// tests can pass a local fixture.
+// returning that folder. The members are bin/ffmpeg and bin/ffprobe plus platform::executable_suffix.
+// The URL and hash are parameters so the core has no hidden network use and tests can pass a local
+// fixture.
 std::filesystem::path ensure_ffmpeg(const std::filesystem::path& install_dir,
                                     const std::string& url = ffmpeg_url(),
                                     const std::string& sha256 = ffmpeg_sha256(),

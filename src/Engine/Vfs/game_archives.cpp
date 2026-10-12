@@ -4,6 +4,7 @@
 // Ported from the ReSkate project (https://github.com/Dingo-Shenanigans/ReSkate); see NOTICE.md.
 #include "game_archives.h"
 #include "Engine/Resource/cas_codec.h"
+#include "Engine/Core/Platform/path_case.h"
 #include "Engine/Core/Platform/path_text.h"
 #include <cstdio>
 #include <cstring>
@@ -26,7 +27,8 @@ std::string archive_file(std::uint16_t archive) {
     return name;
 }
 
-Layout read_layout(const fs::path& path) {
+Layout read_layout(const fs::path& requested) {
+    const auto path = resolve_case(requested);
     std::ifstream input(path, std::ios::binary);
     Layout layout{{std::istreambuf_iterator<char>(input), std::istreambuf_iterator<char>()}, {}};
     if (layout.buffer.size() <= native_db::envelope_size ||
@@ -47,7 +49,7 @@ std::vector<std::uint32_t> GameArchives::chunks_in(const std::string& directory)
 GameArchives::GameArchives(fs::path root, const native_db::Node& layout) : root_(std::move(root)) {
     std::map<std::set<std::uint16_t>, std::vector<std::string>> byArchives;
     std::error_code error;
-    const auto win32 = root_ / "Win32";
+    const auto win32 = resolve_case(root_ / "Win32");
     for (fs::recursive_directory_iterator it(win32, error), end; it != end && !error; it.increment(error)) {
         if (!it->is_regular_file(error) || error) { error.clear(); continue; }
         if (lower(it->path().extension().string()) != ".cas") continue;
@@ -110,8 +112,9 @@ fb::BinaryBundle GameArchives::read_manifest(const fs::path& root, const fb::Cas
 
 std::vector<std::byte> GameArchives::read(const fs::path& root, const fb::CasIdentifier& location,
                                           std::uint32_t offset, std::uint32_t size) const {
-    const auto path = root / "Win32" / fs::path(directory(location.installChunk)) /
-        fs::path(archive_file(location.archive));
+    // The layout's directory names are lowercased; resolve_case finds them on a case-sensitive disk.
+    const auto path = resolve_case(root / "Win32" / fs::path(directory(location.installChunk)) /
+        fs::path(archive_file(location.archive)));
     std::ifstream input(path, std::ios::binary);
     if (!input) throw std::runtime_error("Cannot open " + path_utf8(path));
     input.seekg(static_cast<std::streamoff>(offset));
@@ -134,7 +137,7 @@ std::optional<std::uint64_t> GameArchives::archive_size(const fs::path& root, co
     const auto known = sizes_.find(path.wstring());
     if (known != sizes_.end()) return known->second;
     std::error_code error;
-    const auto size = fs::file_size(path, error);
+    const auto size = fs::file_size(resolve_case(path), error);
     const auto result = error ? std::optional<std::uint64_t>{} : std::optional<std::uint64_t>{size};
     sizes_.emplace(path.wstring(), result);
     return result;

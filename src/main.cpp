@@ -3,27 +3,34 @@
 // ReSkateMusicMaker: a window over the music packer library (MusicPacker/packer.h). Songs in a
 // list (dropped or added), their artist and title editable, then built into the game's Mods
 // folder. A mod built here can be opened again from its project file and rebuilt.
-// Drawn with Dear ImGui through the launcher's Direct3D 12 renderer (Launcher/gui_renderer.cpp).
+// Drawn with Dear ImGui through Direct3D 12 on Windows (gui_renderer_win32.cpp) and SDL2 elsewhere
+// (gui_renderer_sdl.cpp).
 #include "packer.h"
 #include "ffmpeg_fetch.h"
+#include "file_dialog.h"
+#include "platform.h"
 #include "Engine/Core/Json/json.h"
+#include "Engine/Core/Platform/path_case.h"
 #include "gui_renderer.h"
 
+#ifdef _WIN32
 #include <Windows.h>
-#include <ShObjIdl.h>
 #include <shellapi.h>
-#include <shlobj.h>
-#include <tlhelp32.h>
-#include <wrl/client.h>
 
 #include <backends/imgui_impl_dx12.h>
 #include <backends/imgui_impl_win32.h>
+#else
+#include <SDL.h>
+#include <backends/imgui_impl_sdl2.h>
+#include <backends/imgui_impl_sdlrenderer2.h>
+#endif
 #include <imgui.h>
 
 #include <algorithm>
 #include <array>
 #include <atomic>
 #include <cctype>
+#include <cstdio>
 #include <cstring>
 #include <fstream>
 #include <functional>
@@ -36,13 +43,17 @@
 #include <thread>
 #include <vector>
 
+#ifdef _WIN32
 extern IMGUI_IMPL_API LRESULT ImGui_ImplWin32_WndProcHandler(HWND, UINT, WPARAM, LPARAM);
+#endif
 
 namespace {
 namespace fs = std::filesystem;
 using dingosdk::Json;
+using dingosdk::launcher_gui::detail::NativeWindow;
 using dingosdk::launcher_gui::detail::Renderer;
-using Microsoft::WRL::ComPtr;
+using platform::narrow;
+using platform::widen;
 
 constexpr int window_width = 1100, window_height = 700;
 constexpr const char* bitrates[]{"128", "160", "192", "256", "320"};
@@ -62,32 +73,19 @@ struct ExternalSong {
     fs::path folder;    // folder of the mod if from a mod, empty if from game
 };
 
-std::string narrow(const std::wstring& text) {
-    std::string utf8(WideCharToMultiByte(CP_UTF8, 0, text.data(), static_cast<int>(text.size()), nullptr, 0, nullptr, nullptr), '\0');
-    WideCharToMultiByte(CP_UTF8, 0, text.data(), static_cast<int>(text.size()), utf8.data(), static_cast<int>(utf8.size()), nullptr, nullptr);
-    return utf8;
-}
-std::wstring widen(const std::string& text) {
-    std::wstring wide(MultiByteToWideChar(CP_UTF8, 0, text.data(), static_cast<int>(text.size()), nullptr, 0), L'\0');
-    MultiByteToWideChar(CP_UTF8, 0, text.data(), static_cast<int>(text.size()), wide.data(), static_cast<int>(wide.size()));
-    return wide;
-}
 template<std::size_t N> void copy_text(std::array<char, N>& to, const std::string& from) {
     const auto n = std::min(from.size(), N - 1);
     std::copy_n(from.data(), n, to.data());
     to[n] = '\0';
 }
 
-// ---- Settings: the game folder and where ffmpeg is, in %APPDATA%\ReSkateMusicMaker -----------------
+// ---- Settings: the game folder and where ffmpeg is, in %APPDATA%\ReSkateMusicPacker (see platform.h) --
 struct Settings {
     fs::path game, ffmpeg;
 };
 fs::path settings_file() {
-    PWSTR roaming{};
-    fs::path folder;
-    if (SUCCEEDED(SHGetKnownFolderPath(FOLDERID_RoamingAppData, 0, nullptr, &roaming))) folder = fs::path(roaming) / L"ReSkateMusicPacker";
-    CoTaskMemFree(roaming);
-    return folder / L"settings.json";
+    const auto base = platform::config_directory();
+    return (base.empty() ? fs::path{} : base / L"ReSkateMusicPacker") / L"settings.json";
 }
 Settings load_settings() {
     Settings settings;
@@ -109,56 +107,42 @@ void save_settings(const Settings& settings) {
     std::ofstream(settings_file(), std::ios::binary) << root.dump(2) << "\n";
 }
 
-// ---- Windows bits --------------------------------------------------------------------------------
-bool game_folder(const fs::path& folder) { return !folder.empty() && fs::exists(folder / L"Skate.exe"); }
+// ---- Platform bits (platform.h, file_dialog.h) ----------------------------------------------------
+bool game_folder(const fs::path& folder) { return !folder.empty() && fs::exists(dingosdk::resolve_case(folder / L"Skate.exe")); }
+
+// "ffmpeg.exe" on Windows, "ffmpeg" elsewhere.
+std::string program(const char* name) { return std::string(name) + platform::executable_suffix; }
+const std::string ffmpeg_pair = program("ffmpeg") + " and " + program("ffprobe");
 
 // ffmpeg and ffprobe on PATH, or in the folder the user pointed at (added to this process's PATH).
 bool find_ffmpeg(const fs::path& extra) {
-    if (!extra.empty() && fs::exists(extra / L"ffmpeg.exe")) {
-        std::wstring path(GetEnvironmentVariableW(L"PATH", nullptr, 0), L'\0');
-        path.resize(GetEnvironmentVariableW(L"PATH", path.data(), static_cast<DWORD>(path.size())));
-        if (path.find(extra.wstring()) == std::wstring::npos) SetEnvironmentVariableW(L"PATH", (extra.wstring() + L";" + path).c_str());
-    }
-    wchar_t found[MAX_PATH];
-    return SearchPathW(nullptr, L"ffmpeg.exe", nullptr, MAX_PATH, found, nullptr) &&
-           SearchPathW(nullptr, L"ffprobe.exe", nullptr, MAX_PATH, found, nullptr);
+    if (!extra.empty() && fs::exists(extra / program("ffmpeg"))) platform::add_to_path(extra);
+    return platform::on_path("ffmpeg") && platform::on_path("ffprobe");
 }
 
-bool game_running() {
-    const auto snapshot = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
-    if (snapshot == INVALID_HANDLE_VALUE) return false;
-    PROCESSENTRY32W entry{sizeof(entry)};
-    bool running = false;
-    for (auto ok = Process32FirstW(snapshot, &entry); ok && !running; ok = Process32NextW(snapshot, &entry))
-        running = _wcsicmp(entry.szExeFile, L"Skate.exe") == 0;
-    CloseHandle(snapshot);
-    return running;
-}
+bool game_running() { return platform::process_running("Skate.exe"); }
 
-// The shell's file dialog: audio files (several) or one folder.
-std::vector<fs::path> pick(HWND owner, bool folder, bool image = false) {
-    std::vector<fs::path> result;
-    ComPtr<IFileOpenDialog> dialog;
-    if (FAILED(CoCreateInstance(CLSID_FileOpenDialog, nullptr, CLSCTX_INPROC_SERVER, IID_PPV_ARGS(&dialog)))) return result;
-    FILEOPENDIALOGOPTIONS options{};
-    dialog->GetOptions(&options);
-    dialog->SetOptions(options | (folder ? FOS_PICKFOLDERS : image ? 0 : FOS_ALLOWMULTISELECT) | FOS_FORCEFILESYSTEM);
-    if (!folder) {
-        const COMDLG_FILTERSPEC filters[]{{image ? L"Images" : L"Audio", image ? L"*.png;*.jpg;*.jpeg;*.webp;*.bmp" : L"*.mp3;*.flac;*.ogg;*.opus;*.wav;*.m4a;*.aac;*.wma;*.aiff;*.aif;*.webm;*.mka;*.mp4"}, {L"All files", L"*.*"}};
-        dialog->SetFileTypes(2, filters);
-    }
-    if (FAILED(dialog->Show(owner))) return result;
-    ComPtr<IShellItemArray> items;
-    if (FAILED(dialog->GetResults(&items))) return result;
-    DWORD count{};
-    items->GetCount(&count);
-    for (DWORD i = 0; i < count; ++i) {
-        ComPtr<IShellItem> item;
-        PWSTR path{};
-        if (SUCCEEDED(items->GetItemAt(i, &item)) && SUCCEEDED(item->GetDisplayName(SIGDN_FILESYSPATH, &path))) result.emplace_back(path);
-        CoTaskMemFree(path);
-    }
-    return result;
+#if defined(_WIN32)
+constexpr const char* file_manager = "File Explorer";
+#elif defined(__APPLE__)
+constexpr const char* file_manager = "Finder";
+#else
+constexpr const char* file_manager = "your file manager";
+#endif
+const std::string executable_name = program("ReSkateMusicPacker");
+
+// Where to get ffmpeg on this system, for the ffmpeg page and Settings.
+const char* ffmpeg_install_hint() {
+#if defined(_WIN32)
+    return "Install ffmpeg (for example a Windows build linked from the official download page), then point at the "
+           "folder that holds ffmpeg.exe.";
+#elif defined(__APPLE__)
+    return "Install it with Homebrew (brew install ffmpeg) or MacPorts, then press Check again, or point at the "
+           "folder that holds ffmpeg.";
+#else
+    return "Install it with your package manager (for example sudo apt install ffmpeg, sudo dnf install ffmpeg or "
+           "sudo pacman -S ffmpeg), then press Check again, or point at the folder that holds ffmpeg.";
+#endif
 }
 
 // A dropped or chosen folder brings in its audio files, including subfolders, sorted by name.
@@ -210,7 +194,7 @@ struct Row {
 struct ArtworkPreviewResult {
     std::uint64_t generation{};
     std::vector<unsigned char> pixels;
-    UINT width{}, height{};
+    unsigned width{}, height{};
     std::string error;
 };
 
@@ -290,8 +274,12 @@ void clear_artwork_preview(App& app) {
     app.artwork_preview_error.clear();
 }
 
+// The game's Mods folder as the disk spells it, so a "mods" folder on a case-sensitive disk is not
+// shadowed by a second "Mods" that Wine would then see twice.
+fs::path mods_folder(const App& app) { return dingosdk::resolve_case(app.settings.game / L"Mods"); }
+
 fs::path output_folder(const App& app) {
-    return !app.output.empty() ? app.output : app.settings.game / L"Mods" / folder_name(app.name.data());
+    return !app.output.empty() ? app.output : mods_folder(app) / folder_name(app.name.data());
 }
 
 // Scans other installed mods in Mods/ and the game's content cache for existing songs to warn on clash.
@@ -300,9 +288,9 @@ void refresh_external_songs(App& app) {
     if (!game_folder(app.settings.game)) return;
 
     std::error_code ec;
-    const auto mods_folder = app.settings.game / L"Mods";
-    if (fs::exists(mods_folder, ec) && fs::is_directory(mods_folder, ec)) {
-        for (const auto& entry : fs::directory_iterator(mods_folder, ec)) {
+    const auto mods = mods_folder(app);
+    if (fs::exists(mods, ec) && fs::is_directory(mods, ec)) {
+        for (const auto& entry : fs::directory_iterator(mods, ec)) {
             if (!entry.is_directory(ec)) continue;
             const auto mod_path = entry.path();
             const auto mod_name = narrow(mod_path.filename().wstring());
@@ -352,10 +340,7 @@ void refresh_external_songs(App& app) {
     }
 
     try {
-        PWSTR local_appdata{};
-        if (SUCCEEDED(SHGetKnownFolderPath(FOLDERID_LocalAppData, 0, nullptr, &local_appdata))) {
-            const auto cache_dir = fs::path(local_appdata) / L"ReSkate" / L"cache";
-            CoTaskMemFree(local_appdata);
+        for (const auto& cache_dir : platform::reskate_cache_directories(app.settings.game)) {
             if (fs::exists(cache_dir, ec) && fs::is_directory(cache_dir, ec)) {
                 for (const auto& entry : fs::recursive_directory_iterator(cache_dir, fs::directory_options::skip_permission_denied, ec)) {
                     if (entry.is_regular_file(ec) && entry.path().extension() == L".cache") {
@@ -420,10 +405,14 @@ void request_artwork_preview(App& app, std::string label, fs::path source, bool 
         tracks = std::move(tracks), generation]() mutable {
         ArtworkPreviewResult result;
         result.generation = generation;
+#ifdef _WIN32
         const auto com = CoInitializeEx(nullptr, COINIT_MULTITHREADED);
         struct Com { HRESULT status; ~Com() { if (SUCCEEDED(status)) CoUninitialize(); } } cleanup{com};
+#endif
         try {
+#ifdef _WIN32
             if (FAILED(com)) throw std::runtime_error("Could not initialise artwork decoding.");
+#endif
             if (source.empty() && !generated)
                 for (const auto& [file, artwork] : tracks) {
                     if (app.cancel) throw music::Cancelled();
@@ -683,7 +672,7 @@ void build(App& app) {
 }
 
 // ---- Drawing -------------------------------------------------------------------------------------
-void apply_theme() {
+[[maybe_unused]] void apply_theme() { // defined upstream but not called
     auto& style = ImGui::GetStyle();
 
     style.WindowPadding     = ImVec2(S(16.0f), S(14.0f));
@@ -769,7 +758,7 @@ void apply_theme() {
     colors[ImGuiCol_ModalWindowDimBg]     = ImVec4(0.05f, 0.05f, 0.07f, 0.65f);
 }
 
-void setup_page(App& app, HWND window) {
+void setup_page(App& app, NativeWindow window) {
     ImGui::Spacing();
     ImGui::TextColored(ImVec4(0.22f, 0.65f, 1.0f, 1.0f), "Game Setup");
     ImGui::Spacing();
@@ -807,38 +796,45 @@ void ffmpeg_download_controls(App& app, float width) {
     if (clicked) install_ffmpeg(app);
 }
 
-void ffmpeg_page(App& app, HWND window) {
+void ffmpeg_page(App& app, NativeWindow window) {
     ImGui::Spacing();
     ImGui::TextColored(ImVec4(0.22f, 0.65f, 1.0f, 1.0f), "FFmpeg Dependency Required");
     ImGui::Spacing();
-    ImGui::TextWrapped("The music packer uses ffmpeg to read and encode songs, and cannot find ffmpeg.exe and ffprobe.exe. "
-                       "Install ffmpeg (for example a Windows build linked from the official download page), then "
-                       "point at the folder that holds ffmpeg.exe.");
+    ImGui::TextWrapped("The music packer uses ffmpeg to read and encode songs, and cannot find %s. %s",
+                       ffmpeg_pair.c_str(), ffmpeg_install_hint());
     ImGui::Spacing();
-    ffmpeg_download_controls(app, S(300));
-    ImGui::Spacing();
-    ImGui::TextDisabled("- or install it yourself -");
-    ImGui::Spacing();
+    if (music::ffmpeg_download_supported()) {
+        ffmpeg_download_controls(app, S(300));
+        ImGui::Spacing();
+        ImGui::TextDisabled("- or install it yourself -");
+        ImGui::Spacing();
+    } else {
+        if (ImGui::Button("Check again", ImVec2(S(160), S(32)))) {
+            app.ffmpeg = find_ffmpeg(app.settings.ffmpeg);
+            set_status(app, app.ffmpeg ? "" : "Still no " + ffmpeg_pair + " on PATH.", !app.ffmpeg);
+        }
+        ImGui::SameLine();
+    }
     if (ImGui::Button("Open the ffmpeg download page", ImVec2(S(240), S(32))))
-        ShellExecuteW(nullptr, L"open", L"https://ffmpeg.org/download.html", nullptr, nullptr, SW_SHOWNORMAL);
+        platform::open_url("https://ffmpeg.org/download.html");
     ImGui::SameLine();
     if (ImGui::Button("Locate ffmpeg...", ImVec2(S(160), S(32)))) {
         const auto folders = pick(window, true);
         if (!folders.empty()) {
             auto folder = folders[0];
-            if (!fs::exists(folder / L"ffmpeg.exe") && fs::exists(folder / L"bin" / L"ffmpeg.exe")) folder /= L"bin";
+            if (!fs::exists(folder / program("ffmpeg")) && fs::exists(folder / L"bin" / program("ffmpeg"))) folder /= L"bin";
             if (find_ffmpeg(folder)) {
                 app.settings.ffmpeg = folder;
                 save_settings(app.settings);
                 app.ffmpeg = true;
                 set_status(app, "");
-            } else set_status(app, "That folder has no ffmpeg.exe and ffprobe.exe.", true);
+            } else set_status(app, "That folder has no " + ffmpeg_pair + ".", true);
         }
     }
 }
 
 // Reconfigures the game folder and ffmpeg after first-run setup; reachable from any page.
-void settings_modal(App& app, HWND window) {
+void settings_modal(App& app, NativeWindow window) {
     if (app.settings_open) { ImGui::OpenPopup("Settings"); app.settings_open = false; }
     if (!ImGui::BeginPopupModal("Settings", nullptr, ImGuiWindowFlags_AlwaysAutoResize)) return;
     ImGui::PushTextWrapPos(ImGui::GetCursorPosX() + S(540));
@@ -859,26 +855,26 @@ void settings_modal(App& app, HWND window) {
 
     ImGui::Separator();
     ImGui::TextColored(ImVec4(0.22f, 0.65f, 1.0f, 1.0f), "ffmpeg");
-    ImGui::TextWrapped("%s", app.ffmpeg ? "ffmpeg.exe and ffprobe.exe found."
-                                        : "Not found - the packer needs ffmpeg.exe and ffprobe.exe.");
-    if (!app.ffmpeg) {
+    ImGui::TextWrapped("%s", app.ffmpeg ? (ffmpeg_pair + " found.").c_str()
+                                        : ("Not found - the packer needs " + ffmpeg_pair + ". " + ffmpeg_install_hint()).c_str());
+    if (!app.ffmpeg && music::ffmpeg_download_supported()) {
         ffmpeg_download_controls(app, S(250));
         ImGui::Spacing();
     }
     if (ImGui::Button("Open the ffmpeg download page", ImVec2(S(230), S(28))))
-        ShellExecuteW(nullptr, L"open", L"https://ffmpeg.org/download.html", nullptr, nullptr, SW_SHOWNORMAL);
+        platform::open_url("https://ffmpeg.org/download.html");
     ImGui::SameLine();
     if (ImGui::Button("Locate ffmpeg...", ImVec2(S(150), S(28)))) {
         const auto folders = pick(window, true);
         if (!folders.empty()) {
             auto folder = folders[0];
-            if (!fs::exists(folder / L"ffmpeg.exe") && fs::exists(folder / L"bin" / L"ffmpeg.exe")) folder /= L"bin";
+            if (!fs::exists(folder / program("ffmpeg")) && fs::exists(folder / L"bin" / program("ffmpeg"))) folder /= L"bin";
             if (find_ffmpeg(folder)) {
                 app.settings.ffmpeg = folder;
                 save_settings(app.settings);
                 app.ffmpeg = true;
                 set_status(app, "");
-            } else set_status(app, "That folder has no ffmpeg.exe and ffprobe.exe.", true);
+            } else set_status(app, "That folder has no " + ffmpeg_pair + ".", true);
         }
     }
 
@@ -888,7 +884,7 @@ void settings_modal(App& app, HWND window) {
     ImGui::EndPopup();
 }
 
-void songs_page(App& app, HWND window) {
+void songs_page(App& app, NativeWindow window) {
     const bool busy = app.busy;
 
     const std::string defaultPlaylistName = app.playlist[0] ? app.playlist.data() : "Default";
@@ -993,7 +989,7 @@ void songs_page(App& app, HWND window) {
         ImGui::SameLine(0, group_gap);
         ImGui::SetNextItemWidth(name_input_w);
         if (ImGui::InputTextWithHint("##name", "Mod name", app.name.data(), app.name.size()) && !app.output.empty() &&
-            app.output.parent_path() == app.settings.game / L"Mods")
+            app.output.parent_path() == mods_folder(app))
             app.output.clear(); // a renamed new mod goes to its new folder; an opened one stays where it is
         if (ImGui::IsItemHovered()) ImGui::SetTooltip("Mod name (used for the mod folder in Mods/)");
 
@@ -1364,7 +1360,7 @@ void songs_page(App& app, HWND window) {
             const ImVec4 title_col(0.96f, 0.97f, 1.0f, 1.0f);
             center_text("Drop Audio Files or Folders Here", &title_col);
             ImGui::Spacing();
-            center_text_disabled("Drag and drop music directly from File Explorer, or browse below");
+            center_text_disabled(("Drag and drop music directly from " + std::string(file_manager) + ", or browse below").c_str());
             center_text_disabled("Supports MP3, FLAC, WAV, OGG, Opus, AAC, M4A, AIFF, and more");
 
             ImGui::Dummy(ImVec2(0, S(16.0f)));
@@ -1803,7 +1799,7 @@ void songs_page(App& app, HWND window) {
             ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.16f, 0.45f, 0.78f, 1.00f));
             ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(0.22f, 0.54f, 0.90f, 1.00f));
             ImGui::PushStyleColor(ImGuiCol_ButtonActive, ImVec4(0.13f, 0.38f, 0.68f, 1.00f));
-            if (ImGui::Button(("Build into Mods\\" + narrow(output_folder(app).filename().wstring())).c_str(), ImVec2(button_width, S(32)))) {
+            if (ImGui::Button(("Build into Mods" + narrow(std::wstring(1, fs::path::preferred_separator)) + narrow(output_folder(app).filename().wstring())).c_str(), ImVec2(button_width, S(32)))) {
                 set_status(app, "");
                 std::set<std::string> names;
                 if (app.playlist[0]) names.insert(app.playlist.data());
@@ -2035,7 +2031,7 @@ void songs_page(App& app, HWND window) {
         ImGui::TextDisabled("Package: %s", expectedZipName.c_str());
 
         ImGui::Spacing();
-        ImGui::Checkbox("Show in File Explorer when finished", &app.ts_open_explorer);
+        ImGui::Checkbox(("Show in " + std::string(file_manager) + " when finished").c_str(), &app.ts_open_explorer);
         ImGui::Checkbox("Include \"Packaged with ReSkate Music Packer\" link in README", &app.ts_readme_credit);
 
         ImGui::Spacing();
@@ -2058,16 +2054,7 @@ void songs_page(App& app, HWND window) {
                     opts.readme_credit = app.ts_readme_credit;
                     const auto zip = music::export_thunderstore(mod, opts);
                     set_status(app, "Exported: " + narrow(zip.wstring()));
-                    if (app.ts_open_explorer) {
-                        PIDLIST_ABSOLUTE pidl = ILCreateFromPathW(zip.c_str());
-                        if (pidl) {
-                            SHOpenFolderAndSelectItems(pidl, 0, nullptr, 0);
-                            ILFree(pidl);
-                        } else {
-                            ShellExecuteW(nullptr, L"open", L"explorer.exe",
-                                (L"/select,\"" + zip.wstring() + L"\"").c_str(), nullptr, SW_SHOWNORMAL);
-                        }
-                    }
+                    if (app.ts_open_explorer) platform::reveal(zip);
                 }
             } catch (const std::exception& error) {
                 set_status(app, error.what(), true);
@@ -2083,7 +2070,7 @@ void songs_page(App& app, HWND window) {
     }
 }
 
-void frame(App& app, HWND window) {
+void frame(App& app, NativeWindow window) {
     apply_scans(app);
     apply_artwork_preview(app);
     {
@@ -2100,7 +2087,7 @@ void frame(App& app, HWND window) {
                 app.ffmpeg = true;
                 set_status(app, "ffmpeg is ready.");
             } else if (install->ok) {
-                set_status(app, "The ffmpeg download finished, but ffmpeg.exe and ffprobe.exe were not found.", true);
+                set_status(app, "The ffmpeg download finished, but " + ffmpeg_pair + " were not found.", true);
             } else {
                 set_status(app, install->error.empty() ? "The ffmpeg download failed." : install->error, true);
             }
@@ -2135,6 +2122,7 @@ void frame(App& app, HWND window) {
     settings_modal(app, window);
 }
 
+#ifdef _WIN32
 LRESULT CALLBACK window_proc(HWND window, UINT message, WPARAM wparam, LPARAM lparam) {
     if (ImGui_ImplWin32_WndProcHandler(window, message, wparam, lparam)) return 1;
     switch (message) {
@@ -2164,6 +2152,7 @@ LRESULT CALLBACK window_proc(HWND window, UINT message, WPARAM wparam, LPARAM lp
     }
     return DefWindowProcW(window, message, wparam, lparam);
 }
+#endif
 
 int run_cli(int argc, wchar_t** argv) {
     music::PackOptions options;
@@ -2179,7 +2168,7 @@ int run_cli(int argc, wchar_t** argv) {
         if (arg == L"--help" || arg == L"-h" || arg == L"/?") {
             std::printf("ReSkate Music Packer (CLI mode)\n\n"
                         "Usage:\n"
-                        "  ReSkateMusicPacker.exe <game folder> <song folder> [output folder] [options]\n\n"
+                        "  %s <game folder> <song folder> [output folder] [options]\n\n"
                         "Options:\n"
                         "  --name <mod name>          Display name of the mod (default: folder name)\n"
                         "  --playlist <playlist>      Playlist name shown in-game (default: folder name)\n"
@@ -2193,9 +2182,9 @@ int run_cli(int argc, wchar_t** argv) {
                         "  --track-artwork <id> <image>       Cover for Artist - Title\n"
                         "  --generate-playlist-artwork <name> Text cover for a playlist\n"
                         "  --get-ffmpeg [folder]      Download ffmpeg into a folder (default: next to this exe or\n"
-                        "                             %%LOCALAPPDATA%%) and print where it went\n"
+                        "                             %%LOCALAPPDATA%%) and print where it went (Windows only)\n"
                         "  --gui                      Launch graphical user interface\n"
-                        "  --help, -h                 Show this help text\n");
+                        "  --help, -h                 Show this help text\n", executable_name.c_str());
             return 0;
         }
         else if (arg == L"--name" && i + 1 < argc) options.name = narrow(argv[++i]);
@@ -2224,6 +2213,11 @@ int run_cli(int argc, wchar_t** argv) {
         else positional.emplace_back(arg);
     }
     if (get_ffmpeg) {
+        if (!music::ffmpeg_download_supported()) {
+            std::fprintf(stderr, "error: --get-ffmpeg downloads a Windows build; install ffmpeg with your package manager "
+                                 "(brew install ffmpeg, apt install ffmpeg, ...) instead\n");
+            return 2;
+        }
         try {
             const fs::path directory = ffmpeg_dir.empty() ? music::default_install_dir() : ffmpeg_dir;
             std::printf("Downloading ffmpeg into %s ...\n", narrow(directory.wstring()).c_str());
@@ -2244,8 +2238,9 @@ int run_cli(int argc, wchar_t** argv) {
         }
     }
     if (positional.size() < 2 || positional.size() > 3 || options.bitrate < 64 || options.bitrate > 320) {
-        std::fprintf(stderr, "Usage: ReSkateMusicPacker.exe <game folder> <song folder> [output folder] [options]\n"
-                             "Run 'ReSkateMusicPacker.exe --help' for details, or run with no arguments for GUI.\n");
+        std::fprintf(stderr, "Usage: %s <game folder> <song folder> [output folder] [options]\n"
+                             "Run '%s --help' for details, or run with no arguments for GUI.\n",
+                     executable_name.c_str(), executable_name.c_str());
         return 1;
     }
     const auto& songFolder = positional[1];
@@ -2275,8 +2270,9 @@ int run_cli(int argc, wchar_t** argv) {
 
         auto songs = music::scan(files);
         for (const auto& [id, image] : trackArtwork) {
+            const std::string& wanted = id; // Apple Clang < 16 cannot capture a structured binding
             const auto found = std::find_if(songs.begin(), songs.end(), [&](const auto& song) {
-                return song.artist + " - " + song.title == id;
+                return song.artist + " - " + song.title == wanted;
             });
             if (found == songs.end()) throw std::runtime_error("Artwork names an unknown track: " + id);
             found->artwork = image;
@@ -2311,6 +2307,7 @@ int run_cli(int argc, wchar_t** argv) {
 
 
 
+#ifdef _WIN32
 int run_gui(HINSTANCE instance, int /*cmd_show*/) {
 
     const bool com = SUCCEEDED(CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED | COINIT_DISABLE_OLE1DDE));
@@ -2421,3 +2418,127 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int cmd_show) {
     LocalFree(argv);
     return run_gui(instance, cmd_show);
 }
+#else // macOS and Linux: an SDL2 window, the same pages, the same CLI.
+
+namespace {
+// The UI font: what the system uses for plain sans text, at hand without fontconfig on macOS.
+fs::path ui_font() {
+#ifdef __APPLE__
+    for (const char* file : {"/System/Library/Fonts/Supplemental/Arial.ttf", "/Library/Fonts/Arial.ttf"})
+        if (fs::exists(file)) return file;
+#else
+    if (std::string file; platform::run_process({"fc-match", "-f", "%{file}", "sans-serif"}, &file) == 0 && fs::exists(file))
+        return file;
+    for (const char* file : {"/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", "/usr/share/fonts/TTF/DejaVuSans.ttf",
+                             "/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf"})
+        if (fs::exists(file)) return file;
+#endif
+    return {}; // ImGui's built-in font
+}
+} // namespace
+
+int run_gui() {
+    if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_TIMER) != 0) {
+        std::fprintf(stderr, "ReSkate Music Packer: cannot open a window: %s\n", SDL_GetError());
+        return 1;
+    }
+    // macOS lays out in points and SDL renders them at the display's density. Linux desktops report
+    // their scale as DPI instead, which sizes the layout the way the Windows build does.
+#ifndef __APPLE__
+    if (float dpi{}; SDL_GetDisplayDPI(0, &dpi, nullptr, nullptr) == 0 && dpi > 0) g_scale = std::max(1.0f, dpi / 96.0f);
+#endif
+    if (SDL_Rect work{}; SDL_GetDisplayUsableBounds(0, &work) == 0 && work.w > 0 && work.h > 0)
+        g_scale = std::clamp(std::min(static_cast<float>(work.w) * 0.98f / window_width,
+                                      static_cast<float>(work.h) * 0.96f / window_height), 0.62f, g_scale);
+    auto* window = SDL_CreateWindow("ReSkate Music Packer", SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED,
+                                    static_cast<int>(S(window_width)), static_cast<int>(S(window_height)),
+                                    SDL_WINDOW_ALLOW_HIGHDPI);
+    if (!window) {
+        std::fprintf(stderr, "ReSkate Music Packer: cannot open a window: %s\n", SDL_GetError());
+        SDL_Quit();
+        return 1;
+    }
+
+    IMGUI_CHECKVERSION();
+    ImGui::CreateContext();
+    auto& io = ImGui::GetIO();
+    io.IniFilename = nullptr;
+    Renderer renderer;
+    if (!renderer.init(window)) {
+        SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_ERROR, "ReSkate Music Packer", "This system's graphics driver cannot draw the window.", window);
+        return 1;
+    }
+    ImGui_ImplSDL2_InitForSDLRenderer(window, renderer.sdl());
+    // Rasterize the font at the display's pixel density and draw it at point size, so text is sharp on Retina.
+    int points{}, pixels{};
+    SDL_GetWindowSize(window, &points, nullptr);
+    SDL_GetRendererOutputSize(renderer.sdl(), &pixels, nullptr);
+    const float density = points > 0 && pixels > points ? static_cast<float>(pixels) / static_cast<float>(points) : 1.0f;
+    if (const auto font = ui_font(); !font.empty()) {
+        io.Fonts->AddFontFromFileTTF(font.string().c_str(), S(18.0f) * density);
+        io.FontGlobalScale = 1.0f / density;
+    }
+    ImGui::StyleColorsDark();
+    ImGui::GetStyle().ScaleAllSizes(g_scale);
+
+    auto app_storage = std::make_unique<App>();
+    auto& app = *app_storage;
+    app.renderer = &renderer;
+    g_app = &app;
+    app.settings = load_settings();
+    app.ffmpeg = find_ffmpeg(app.settings.ffmpeg);
+    refresh_external_songs(app);
+
+    bool running = true;
+    while (running) {
+        SDL_Event event;
+        while (SDL_PollEvent(&event)) {
+            ImGui_ImplSDL2_ProcessEvent(&event);
+            if (event.type == SDL_QUIT) running = false;
+            if (event.type == SDL_WINDOWEVENT && event.window.event == SDL_WINDOWEVENT_CLOSE) running = false;
+            if (event.type == SDL_DROPFILE) {
+                {
+                    std::lock_guard lock(app.dropped_mutex);
+                    app.dropped.emplace_back(event.drop.file);
+                }
+                SDL_free(event.drop.file);
+            }
+        }
+        if (!running) break;
+        if (SDL_GetWindowFlags(window) & SDL_WINDOW_MINIMIZED) { SDL_Delay(50); continue; }
+        ImGui_ImplSDLRenderer2_NewFrame();
+        ImGui_ImplSDL2_NewFrame();
+        ImGui::NewFrame();
+        frame(app, window);
+        ImGui::Render();
+        renderer.render();
+    }
+    app.cancel = true;
+    if (app.worker.joinable()) app.worker.join();
+    if (app.artwork_preview) renderer.release_texture(app.artwork_preview);
+    g_app = nullptr;
+    renderer.shutdown();
+    ImGui_ImplSDL2_Shutdown();
+    ImGui::DestroyContext();
+    SDL_DestroyWindow(window);
+    SDL_Quit();
+    return 0;
+}
+
+int main(int argc, char** argv) {
+    platform::add_common_program_folders();
+    bool force_gui = false;
+    for (int i = 1; i < argc; ++i)
+        if (std::string_view(argv[i]) == "--gui") force_gui = true;
+    // macOS adds -psn_... when an app bundle is opened from Finder; that is not a CLI run.
+    const bool cli = argc > 1 && !force_gui && !std::string_view(argv[1]).starts_with("-psn_");
+    if (cli) {
+        std::vector<std::wstring> wide;
+        for (int i = 0; i < argc; ++i) wide.push_back(platform::widen(argv[i]));
+        std::vector<wchar_t*> pointers;
+        for (auto& arg : wide) pointers.push_back(arg.data());
+        return run_cli(argc, pointers.data());
+    }
+    return run_gui();
+}
+#endif

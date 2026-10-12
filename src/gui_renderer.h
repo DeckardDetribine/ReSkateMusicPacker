@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 #pragma once
 
+#ifdef _WIN32
 #include <Windows.h>
 #include <d3d12.h>
 #include <dxgi1_4.h>
@@ -15,6 +16,9 @@
 
 // The launcher window's Direct3D 12 renderer and its image decoding.
 namespace dingosdk::launcher_gui::detail {
+
+// The window handle the renderer, file dialogs and GUI pages take.
+using NativeWindow = HWND;
 
 using Microsoft::WRL::ComPtr;
 
@@ -68,3 +72,36 @@ std::vector<unsigned char> background_bytes(const std::filesystem::path& directo
 std::vector<unsigned char> resource_bytes(const wchar_t* name);
 
 } // namespace dingosdk::launcher_gui::detail
+#else // macOS and Linux: SDL2 and its 2D renderer (Metal, OpenGL or software, whichever works).
+
+#include <imgui.h>
+
+#include <vector>
+
+struct SDL_Renderer;
+struct SDL_Window;
+
+namespace dingosdk::launcher_gui::detail {
+
+using NativeWindow = SDL_Window*;
+
+class Renderer {
+public:
+    bool init(SDL_Window* window);
+    void render();
+    // Uploads RGBA pixels and returns the texture's ImGui id; empty on failure.
+    ImTextureID upload_texture(const std::vector<unsigned char>& pixels, unsigned width, unsigned height);
+    void release_texture(ImTextureID id);
+    void shutdown();
+    SDL_Renderer* sdl() const { return renderer_; }
+
+private:
+    SDL_Renderer* renderer_{};
+};
+
+// Decodes a JPEG/PNG to RGBA with stb_image, scaled down to cover `cover` pixels at most.
+bool decode_image(const std::vector<unsigned char>& bytes, ImVec2 cover, std::vector<unsigned char>& pixels,
+                  unsigned& width, unsigned& height);
+
+} // namespace dingosdk::launcher_gui::detail
+#endif

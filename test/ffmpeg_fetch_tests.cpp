@@ -4,8 +4,9 @@
 // download -> verify -> extract path using a local fixture archive instead of the network.
 #include "ffmpeg_fetch.h"
 #include "miniz.h"
-#include <Windows.h>
+#include "platform.h"
 #include <atomic>
+#include <chrono>
 #include <cstdio>
 #include <filesystem>
 #include <fstream>
@@ -20,11 +21,9 @@ int failures = 0;
 void check(bool ok, const char* what) {
     if (!ok) { std::printf("FAIL: %s\n", what); ++failures; }
 }
-std::string narrow(const std::wstring& text) {
-    std::string utf8(WideCharToMultiByte(CP_UTF8, 0, text.data(), static_cast<int>(text.size()), nullptr, 0, nullptr, nullptr), '\0');
-    WideCharToMultiByte(CP_UTF8, 0, text.data(), static_cast<int>(text.size()), utf8.data(), static_cast<int>(utf8.size()), nullptr, nullptr);
-    return utf8;
-}
+using platform::narrow;
+const std::string ffmpeg_exe = std::string("ffmpeg") + platform::executable_suffix;
+const std::string ffprobe_exe = std::string("ffprobe") + platform::executable_suffix;
 std::string read_text(const fs::path& path) {
     std::ifstream in(path, std::ios::binary);
     return std::string(std::istreambuf_iterator<char>(in), std::istreambuf_iterator<char>());
@@ -40,8 +39,8 @@ void make_fixture_zip(const fs::path& path, const std::string& top) {
     if (!mz_zip_writer_init_heap(&zip, 0, 0)) throw std::runtime_error("fixture: init");
     struct End { mz_zip_archive* zip; ~End() { mz_zip_writer_end(zip); } } end{&zip};
     const std::vector<std::pair<std::string, std::string>> entries{
-        {top + "/bin/ffmpeg.exe", "this is the fake ffmpeg binary"},
-        {top + "/bin/ffprobe.exe", "this is the fake ffprobe binary"},
+        {top + "/bin/" + ffmpeg_exe, "this is the fake ffmpeg binary"},
+        {top + "/bin/" + ffprobe_exe, "this is the fake ffprobe binary"},
         {top + "/LICENSE.txt", "LGPL notice"},
     };
     for (const auto& [name, content] : entries)
@@ -58,8 +57,9 @@ void make_fixture_zip(const fs::path& path, const std::string& top) {
 }
 } // namespace
 
-int wmain() try {
-    const auto root = fs::temp_directory_path() / (L"FfmpegFetchTests-" + std::to_wstring(GetCurrentProcessId()) + L"-" + std::to_wstring(GetTickCount64()));
+int main() try {
+    const auto root = fs::temp_directory_path() /
+        ("FfmpegFetchTests-" + std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
     fs::create_directories(root);
     struct Cleanup { fs::path root; ~Cleanup() { std::error_code ec; fs::remove_all(root, ec); } } cleanup{root};
 
@@ -73,8 +73,8 @@ int wmain() try {
 
     const auto fixture = root / L"fixture.zip";
     make_fixture_zip(fixture, "ffmpeg-test-build");
-    const auto extracted = root / L"out" / L"ffmpeg.exe";
-    music::extract_zip_member(fixture, "bin/ffmpeg.exe", extracted);
+    const auto extracted = root / L"out" / ffmpeg_exe;
+    music::extract_zip_member(fixture, "bin/" + ffmpeg_exe, extracted);
     check(read_text(extracted) == "this is the fake ffmpeg binary", "extract_zip_member finds a member under its top folder");
     try {
         music::extract_zip_member(fixture, "bin/ffplay.exe", root / L"out" / L"ffplay.exe");
@@ -83,9 +83,9 @@ int wmain() try {
 
     const auto install = root / L"install";
     const auto installed = music::ensure_ffmpeg(install, narrow(fixture.wstring()), music::sha256_of_file(fixture));
-    check(installed == install && fs::exists(install / L"ffmpeg.exe") && fs::exists(install / L"ffprobe.exe"),
+    check(installed == install && fs::exists(install / ffmpeg_exe) && fs::exists(install / ffprobe_exe),
           "ensure_ffmpeg downloads, verifies and extracts both binaries");
-    check(read_text(install / L"ffprobe.exe") == "this is the fake ffprobe binary", "the extracted ffprobe is intact");
+    check(read_text(install / ffprobe_exe) == "this is the fake ffprobe binary", "the extracted ffprobe is intact");
     check(!fs::exists(install / L"ffmpeg-download.zip"), "ensure_ffmpeg removes the archive it downloaded");
 
     const auto rejected = root / L"rejected";
@@ -93,7 +93,7 @@ int wmain() try {
         music::ensure_ffmpeg(rejected, narrow(fixture.wstring()), std::string(64, '0'));
         check(false, "a wrong checksum aborts");
     } catch (const std::runtime_error&) {}
-    check(!fs::exists(rejected / L"ffmpeg.exe") && !fs::exists(rejected / L"ffprobe.exe"),
+    check(!fs::exists(rejected / ffmpeg_exe) && !fs::exists(rejected / ffprobe_exe),
           "a checksum mismatch extracts nothing");
 
     std::atomic<bool> cancel = true;

@@ -4,7 +4,9 @@ Thanks for helping improve ReSkate Music Packer.
 
 ## Before you start
 
-- This is a **Windows** tool (Visual Studio 2022, C++20, CMake). Keep it that way.
+- This builds on **Windows** (Visual Studio 2022), **macOS** and **Linux** (C++20, CMake). Keep all three
+  building: put OS-specific code behind `platform.h` / `file_dialog.h` / `gui_renderer.h` (or an
+  `#ifdef _WIN32` in the few engine spots that already have one), not in shared code.
 - For anything larger than a small fix, **open an issue first** so we can agree on the approach. Keep
   pull requests focused on one change.
 
@@ -18,7 +20,8 @@ cmake --build build/vs2022-x64 --config Release
 .\build\vs2022-x64\Release\ReSkateMusicPackerTests.exe
 ```
 
-The tests and the tool need `ffmpeg`/`ffprobe` on `PATH`.
+The tests and the tool need `ffmpeg`/`ffprobe` on `PATH`. On macOS/Linux, see
+[docs/building.md](docs/building.md) for the same steps with `ctest`.
 
 ## Style
 

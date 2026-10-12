@@ -4,10 +4,12 @@
 // ffmpeg_fetch.h for the contract. WinHTTP follows the redirect from github.com to its asset CDN.
 #include "ffmpeg_fetch.h"
 #include "miniz.h"
+#include "platform.h"
+#include "sha.h"
+#ifdef _WIN32
 #include <Windows.h>
-#include <bcrypt.h>
-#include <shlobj.h>
 #include <winhttp.h>
+#endif
 #include <array>
 #include <algorithm>
 #include <cctype>
@@ -32,16 +34,8 @@ constexpr char default_url[] =
 constexpr char default_sha256[] = "4a7642b2264c03e8a0ce8a3825b933ee5580656f45695a086fe7e294045ffc0a";
 constexpr std::uint64_t max_download = 400ull * 1024 * 1024;
 
-std::wstring widen(const std::string& text) {
-    std::wstring wide(MultiByteToWideChar(CP_UTF8, 0, text.data(), static_cast<int>(text.size()), nullptr, 0), L'\0');
-    MultiByteToWideChar(CP_UTF8, 0, text.data(), static_cast<int>(text.size()), wide.data(), static_cast<int>(wide.size()));
-    return wide;
-}
-std::string narrow(const std::wstring& text) {
-    std::string utf8(WideCharToMultiByte(CP_UTF8, 0, text.data(), static_cast<int>(text.size()), nullptr, 0, nullptr, nullptr), '\0');
-    WideCharToMultiByte(CP_UTF8, 0, text.data(), static_cast<int>(text.size()), utf8.data(), static_cast<int>(utf8.size()), nullptr, nullptr);
-    return utf8;
-}
+using platform::narrow;
+using platform::widen;
 
 bool writable_directory(const fs::path& dir) {
     std::error_code error;
@@ -55,13 +49,6 @@ bool writable_directory(const fs::path& dir) {
     }
     fs::remove(probe, error);
     return !error;
-}
-fs::path executable_directory() {
-    std::wstring buffer(MAX_PATH, L'\0');
-    const DWORD length = GetModuleFileNameW(nullptr, buffer.data(), static_cast<DWORD>(buffer.size()));
-    if (length == 0 || length >= buffer.size()) return {};
-    buffer.resize(length);
-    return fs::path(buffer).parent_path();
 }
 
 // Copies a local path or file:// URL, so the tests stay offline and FFMPEG_URL can point at a mirror.
@@ -88,6 +75,7 @@ void download_local(const std::string& source, const fs::path& dest,
     }
 }
 
+#ifdef _WIN32
 struct InternetHandle {
     HINTERNET handle{};
     ~InternetHandle() { if (handle) WinHttpCloseHandle(handle); }
@@ -172,6 +160,13 @@ void download_http(const std::string& url, const fs::path& dest,
     }
     if (total && received != total) throw std::runtime_error("The ffmpeg download stopped before it was complete.");
 }
+#else
+void download_http(const std::string&, const fs::path&, const std::function<void(const DownloadProgress&)>&,
+                   const std::atomic<bool>*) {
+    throw std::runtime_error("Downloading ffmpeg is only built for Windows. Install it with your package manager "
+                             "(brew install ffmpeg, apt install ffmpeg, ...) instead.");
+}
+#endif
 
 // A member by exact name, or by path suffix so "bin/ffmpeg.exe" finds "<top>/bin/ffmpeg.exe".
 // Backslashes are treated as separators too: a few zip writers still store Windows-style paths.
@@ -191,36 +186,35 @@ int find_member(mz_zip_archive* zip, const std::string& member) {
 
 } // namespace
 
+bool ffmpeg_download_supported() {
+#ifdef _WIN32
+    return true;
+#else
+    return false;
+#endif
+}
+
 const char* ffmpeg_url() {
-    const DWORD needed = GetEnvironmentVariableW(L"FFMPEG_URL", nullptr, 0);
-    static const std::string value = [needed] {
-        if (needed == 0) return std::string(default_url);
-        std::wstring buffer(needed, L'\0');
-        buffer.resize(GetEnvironmentVariableW(L"FFMPEG_URL", buffer.data(), needed));
-        return narrow(buffer);
+    static const std::string value = [] {
+        const auto set = platform::environment("FFMPEG_URL");
+        return set.empty() ? std::string(default_url) : set;
     }();
     return value.c_str();
 }
 const char* ffmpeg_sha256() {
-    const DWORD needed = GetEnvironmentVariableW(L"FFMPEG_SHA256", nullptr, 0);
-    static const std::string value = [needed] {
-        if (needed == 0) return std::string(default_sha256);
-        std::wstring buffer(needed, L'\0');
-        buffer.resize(GetEnvironmentVariableW(L"FFMPEG_SHA256", buffer.data(), needed));
-        return narrow(buffer);
+    static const std::string value = [] {
+        const auto set = platform::environment("FFMPEG_SHA256");
+        return set.empty() ? std::string(default_sha256) : set;
     }();
     return value.c_str();
 }
 
 std::filesystem::path default_install_dir() {
-    if (const auto exe = executable_directory(); !exe.empty()) {
+    if (const auto exe = platform::executable_directory(); !exe.empty()) {
         const auto portable = exe / L"ffmpeg";
         if (writable_directory(portable)) return portable;
     }
-    PWSTR local{};
-    fs::path root;
-    if (SUCCEEDED(SHGetKnownFolderPath(FOLDERID_LocalAppData, 0, nullptr, &local))) root = local;
-    CoTaskMemFree(local);
+    const auto root = platform::data_directory();
     const auto fallback = (root.empty() ? fs::temp_directory_path() : root) / L"ReSkateMusicPacker" / L"ffmpeg";
     std::error_code error;
     fs::create_directories(fallback, error);
@@ -229,30 +223,7 @@ std::filesystem::path default_install_dir() {
 }
 
 std::string sha256_of_file(const std::filesystem::path& file) {
-    BCRYPT_ALG_HANDLE algorithm{};
-    if (BCryptOpenAlgorithmProvider(&algorithm, BCRYPT_SHA256_ALGORITHM, nullptr, 0) < 0)
-        throw std::runtime_error("Cannot open the SHA-256 provider.");
-    BCRYPT_HASH_HANDLE handle{};
-    if (BCryptCreateHash(algorithm, &handle, nullptr, 0, nullptr, 0, 0) < 0) {
-        BCryptCloseAlgorithmProvider(algorithm, 0);
-        throw std::runtime_error("Cannot start a SHA-256 hash.");
-    }
-    std::ifstream in(file, std::ios::binary);
-    if (!in) {
-        BCryptDestroyHash(handle);
-        BCryptCloseAlgorithmProvider(algorithm, 0);
-        throw std::runtime_error("Cannot read " + narrow(file.wstring()));
-    }
-    std::array<char, 65536> buffer{};
-    while (in.read(buffer.data(), static_cast<std::streamsize>(buffer.size())) || in.gcount() > 0)
-        BCryptHashData(handle, reinterpret_cast<PUCHAR>(buffer.data()), static_cast<ULONG>(in.gcount()), 0);
-    std::array<unsigned char, 32> digest{};
-    BCryptFinishHash(handle, digest.data(), static_cast<ULONG>(digest.size()), 0);
-    BCryptDestroyHash(handle);
-    BCryptCloseAlgorithmProvider(algorithm, 0);
-    char hex[65];
-    for (std::size_t i = 0; i < digest.size(); ++i) std::snprintf(hex + i * 2, 3, "%02x", digest[i]);
-    return std::string(hex, 64);
+    return hex_digest(sha256_file(file));
 }
 
 bool verify_sha256(const std::filesystem::path& file, const std::string& expected) {
@@ -309,8 +280,10 @@ std::filesystem::path ensure_ffmpeg(const std::filesystem::path& install_dir, co
     download_to_file(url, archive, progress, cancel);
     if (!verify_sha256(archive, sha256))
         throw std::runtime_error("The ffmpeg download did not match its expected checksum and was rejected.");
-    extract_zip_member(archive, "bin/ffmpeg.exe", install_dir / L"ffmpeg.exe");
-    extract_zip_member(archive, "bin/ffprobe.exe", install_dir / L"ffprobe.exe");
+    const std::string ffmpeg = std::string("ffmpeg") + platform::executable_suffix;
+    const std::string ffprobe = std::string("ffprobe") + platform::executable_suffix;
+    extract_zip_member(archive, "bin/" + ffmpeg, install_dir / ffmpeg);
+    extract_zip_member(archive, "bin/" + ffprobe, install_dir / ffprobe);
     return install_dir;
 }
 
